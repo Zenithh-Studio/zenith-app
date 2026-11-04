@@ -57,7 +57,7 @@ export class LocalScheduler extends EventEmitter {
     if(graph.nodes.length===0) throw new Error('Cannot run an empty graph');
     const runId=this.db.createRun(workflowId,graph);
     this.emitChange(runId,'run-updated');
-    void this.tick();
+    if (this.timer) void this.tick();
     return runId;
   }
   cancelRun(id:string):void {

@@ -13,8 +13,8 @@ test('persistent mock workflow saves generated JSON artifacts',async()=>{
   const scheduler=new LocalScheduler(db);
   try {
     const project=db.createProject('Test Film');
-    const runId=scheduler.startRun(project.project.workflowId);
     scheduler.start();
+    const runId=scheduler.startRun(project.project.workflowId);
     let snapshot=db.getRun(runId);
     for(let i=0;i<120 && !['SUCCEEDED','FAILED'].includes(snapshot.status);i++) {
       await delay(50);snapshot=db.getRun(runId);
