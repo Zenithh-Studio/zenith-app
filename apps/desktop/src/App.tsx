@@ -172,7 +172,7 @@ export default function App() {
       <main className="main-content">
         <div className="canvas-heading"><div><h2>Workflow Canvas</h2><small>{project?.project.name??'Loading...'} · revision {revision} {dirty?'· Unsaved':''}</small></div><span className="canvas-version">ZNITH v0.2 · PHASE 1+2</span></div>
         <div className="flow-area">
-          <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes}
+          <ReactFlow key={project?.project.id??'loading'} nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onConnect={onConnect} onNodeClick={(_event,node)=>setSelectedId(node.id)}
             onPaneClick={()=>setSelectedId(null)} fitView fitViewOptions={{padding:0.25}}
