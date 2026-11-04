@@ -250,7 +250,7 @@ export default function App() {
             <button className="ghost" onClick={()=>void window.znith.runs.approveNode(selectedRun.id,false).catch(e=>setError(String(e)))}>Reject</button>
           </div>}
           {selectedRun?.status==='FAILED'&&<button className="ghost" onClick={()=>void window.znith.runs.retryNode(selectedRun.id).catch(e=>setError(String(e)))}>↻ Retry node</button>}
-          {selectedRun?.outputRefs.map(a=><button className="artifact-link" key={a.id} onClick={()=>void showArtifact(a.id)}>▤ View {a.type} JSON</button>)}
+          {selectedRun?.outputRefs.map(a=><button className="artifact-link" key={a.id} onClick={()=>void (['image','video','audio','film'].includes(a.type)?window.znith.artifacts.reveal(a.id):showArtifact(a.id)).catch(e=>setError(String(e)))}>▤ {['image','video','audio','film'].includes(a.type)?'Open':'View'} {a.type}</button>)}
           {artifactText&&<pre className="artifact-preview">{artifactText}</pre>}
         </>:<div className="inspector-placeholder">Select a canvas node to edit its configuration or inspect generated artifacts.</div>}
       </aside>
