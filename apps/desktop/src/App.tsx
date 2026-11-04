@@ -5,9 +5,10 @@ import {
   type Node, type Edge, type Connection, type NodeChange, type EdgeChange
 } from '@xyflow/react';
 import { NODE_DEFINITIONS } from '@znith/node-registry';
-import { graphSchema, type GraphNode, type ProjectData, type ProjectSummary,
+import { graphSchema, type GraphNode, type ProjectData,
   type RunSnapshot, type WorkflowGraph } from '@znith/contracts';
 import FlowNode from './FlowNode';
+import WorkflowManagement from './WorkflowManagement';
 
 const nodeTypes={znith:FlowNode};
 const emptyGraph:WorkflowGraph={schemaVersion:2,nodes:[],edges:[]};
@@ -15,7 +16,7 @@ const CATEGORY_ORDER=['input','skill','logic','media'] as const;
 const CATEGORY_LABEL:Record<string,string>={input:'INPUT',skill:'AI SKILLS',logic:'LOGIC',media:'MEDIA'};
 
 export default function App() {
-  const [projects,setProjects]=useState<ProjectSummary[]>([]);
+  const [view,setView]=useState<'management'|'editor'>(()=>window.location.pathname.endsWith('/editor')?'editor':'management');
   const [project,setProject]=useState<ProjectData|null>(null);
   const [graph,setGraph]=useState<WorkflowGraph>(emptyGraph);
   const [revision,setRevision]=useState(1);
@@ -28,23 +29,24 @@ export default function App() {
   const [saving,setSaving]=useState(false);
   const [dirty,setDirty]=useState(false);
 
-  const openProject=useCallback(async(id:string)=>{
+  const openWorkflow=useCallback(async(id:string,updateAddress=true)=>{
     try {
-      const data=await window.znith.projects.open(id);
+      const data=await window.znith.workflows.open(id);
       setProject(data);setGraph(data.graph);setRevision(data.revision);setRun(null);
       setRunId(await window.znith.runs.latest(data.project.workflowId));setArtifactText('');setSelectedId(null);setDirty(false);setError('');
+      setView('editor');
+      if(updateAddress)window.history.pushState(null,'',`/workflows/${encodeURIComponent(id)}/editor`);
     } catch(e) {setError(String(e));}
   },[]);
   useEffect(()=>{
-    let enabled=true;
-    void window.znith.projects.list().then(p=>{
-      if(!enabled)return;
-      setProjects(p);
-      if(p[0])void openProject(p[0].id);
-    }).catch(e=>setError(String(e)));
-    return()=>{enabled=false;};
-  },[openProject]);
-
+    const syncRoute=()=>{
+      const match=window.location.pathname.match(/^\/workflows\/([^/]+)\/editor$/);
+      if(match)void openWorkflow(decodeURIComponent(match[1]),false);
+      else setView('management');
+    };
+    window.addEventListener('popstate',syncRoute);syncRoute();
+    return()=>window.removeEventListener('popstate',syncRoute);
+  },[openWorkflow]);
   useEffect(()=>{
     if(!runId)return;
     let alive=true;
@@ -130,29 +132,18 @@ export default function App() {
       setRunId(id);setArtifactText('');setNotice('Mock workflow started');
     }catch(e){setError(String(e));}
   };
-  const createProject=async()=>{
-    const name=window.prompt('Tên project mới', 'My Film');
-    if(!name?.trim())return;
-    try {
-      const created=await window.znith.projects.create(name);
-      setProjects(await window.znith.projects.list());
-      await openProject(created.project.id);
-    }catch(e){setError(String(e));}
-  };
   const showArtifact=async(artifactId:string)=>{
     try{setArtifactText(await window.znith.artifacts.readText(artifactId));}catch(e){setError(String(e));}
   };
   const selectedRun=run?.nodes.find(n=>n.nodeId===selectedId);
+  if(view==='management') return <WorkflowManagement onOpen={id=>void openWorkflow(id)}/>;
   return <div className="shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">✦</span><b>ZNITH</b><span className="brand-sub">AI FILM STUDIO</span></div>
       <div className="top-actions">
         <span className="tag">DESKTOP · LOCAL-FIRST</span>
-        <span className="project-select-label">PROJECT</span>
-        <select className="project-select" value={project?.project.id??''} onChange={e=>{if(dirty&&!window.confirm('Discard unsaved changes?'))return;void openProject(e.target.value);}}>
-          {projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}
-        </select>
-        <button className="ghost" onClick={()=>void createProject()}>+ Project</button>
+        <button className="ghost" onClick={()=>{if(dirty&&!window.confirm('Discard unsaved changes?'))return;window.history.pushState(null,'','/workflows');setView('management');}}>← Workflows</button>
+        <span className="project-select-label">{project?.workflowName}</span>
         <button className="ghost" disabled={!project||!dirty||saving} onClick={()=>void save()}>{saving?'Saving...':dirty?'Save *':'Saved'}</button>
         <button className="run-button" disabled={!project} onClick={()=>void start()}>▶ Run Workflow</button>
       </div>
@@ -170,7 +161,7 @@ export default function App() {
         <div className="sidebar-foot"><span className="status-dot"/> Local-first execution<br/><small>Mock by default · Ollama opt-in</small></div>
       </aside>
       <main className="main-content">
-        <div className="canvas-heading"><div><h2>Workflow Canvas</h2><small>{project?.project.name??'Loading...'} · revision {revision} {dirty?'· Unsaved':''}</small></div><span className="canvas-version">ZNITH v0.2 · PHASE 1+2</span></div>
+        <div className="canvas-heading"><div><h2>{project?.workflowName??'Workflow Canvas'}</h2><small>{project?.project.name??'Loading...'} · revision {revision} {dirty?'· Unsaved':''}</small></div><span className="canvas-version">ZNITH v0.3 · VISUAL WORKFLOW STUDIO</span></div>
         <div className="flow-area">
           <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
