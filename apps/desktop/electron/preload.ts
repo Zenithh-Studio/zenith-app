@@ -15,6 +15,7 @@ const bridge:ZnithAPI={
     get:(id:string)=>ipcRenderer.invoke('runs:get',id),
     cancel:(id:string)=>ipcRenderer.invoke('runs:cancel',id),
     retryNode:(id:string)=>ipcRenderer.invoke('runs:retry',id),
+    approveNode:(id:string,approved:boolean)=>ipcRenderer.invoke('runs:approve',id,approved),
     subscribe:(runId:string,callback:(event:RunEvent)=>void)=>{
       const listener=(_event:Electron.IpcRendererEvent,payload:RunEvent)=>{
         if(payload && payload.runId===runId) callback(payload);
