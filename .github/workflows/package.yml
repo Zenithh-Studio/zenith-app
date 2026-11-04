@@ -1,0 +1,30 @@
+name: Build desktop artifacts (manual)
+on:
+  workflow_dispatch:
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm package:dir
+      - uses: actions/upload-artifact@v4
+        with:
+          name: znith-desktop-${{ runner.os }}-unsigned
+          path: apps/desktop/release/**
+          if-no-files-found: error
+          retention-days: 7
