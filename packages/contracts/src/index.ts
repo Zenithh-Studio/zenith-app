@@ -103,7 +103,7 @@ export interface RunEvent {
   timestamp: number;
 }
 export interface ZnithAPI {
-  files: { pickImage():Promise<string|null> };
+  files: { pickImage():Promise<string|null>; previewImage(path:string):Promise<MediaPreview> };
   projects: {
     list(): Promise<ProjectSummary[]>;
     create(name: string): Promise<ProjectData>;

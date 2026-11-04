@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ZnithAPI, RunEvent, WorkflowGraph } from '@znith/contracts';
 const bridge:ZnithAPI={
-  files:{pickImage:()=>ipcRenderer.invoke('files:pick-image')},
+  files:{pickImage:()=>ipcRenderer.invoke('files:pick-image'),previewImage:(path:string)=>ipcRenderer.invoke('files:preview-image',path)},
   projects:{
     list:()=>ipcRenderer.invoke('projects:list'),
     create:(name:string)=>ipcRenderer.invoke('projects:create',name),

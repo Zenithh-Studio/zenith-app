@@ -68,12 +68,14 @@ function AppContent() {
   const [pickerFilter,setPickerFilter]=useState('');
   const [branchFrom,setBranchFrom]=useState<string|null>(null);
   const [previews,setPreviews]=useState<Record<string,MediaPreview>>({});
+  const [referencePreviews,setReferencePreviews]=useState<Record<string,MediaPreview>>({});
   const [toolMode,setToolMode]=useState<'select'|'pan'>('select');
 
   const openWorkflow=useCallback(async(id:string,updateAddress=true)=>{
     try {
       const data=await window.znith.workflows.open(id);
       lastFitWorkflowId.current=null;
+      setReferencePreviews({});
       setProject(data);setGraph(data.graph);setRevision(data.revision);setRun(null);
       setRunId(await window.znith.runs.latest(data.project.workflowId));setArtifactText('');setSelectedId(null);setDirty(false);setError('');
       setView('editor');
@@ -99,7 +101,7 @@ function AppContent() {
     return()=>cancelAnimationFrame(frame);
   },[fitView,graph.nodes.length,nodesInitialized,project?.project.workflowId,view]);
   useEffect(()=>{
-    if(!runId)return;
+    if(!runId||(run&& !['PENDING','RUNNING','WAITING_APPROVAL'].includes(run.status)))return;
     let alive=true;
     const refresh=()=>void window.znith.runs.get(runId).then(snapshot=>{
       if(alive)setRun(snapshot);
@@ -108,7 +110,18 @@ function AppContent() {
     const unsub=window.znith.runs.subscribe(runId,refresh);
     const poll=setInterval(refresh,1300);
     return()=>{alive=false;unsub();clearInterval(poll);};
-  },[runId]);
+  },[runId,run?.status]);
+
+  const referencePreviewKey=graph.nodes.filter(node=>node.type==='media.image-reference'&&String(node.config.sourcePath??'').trim())
+    .map(node=>`${node.id}:${String(node.config.sourcePath)}`).join('|');
+  useEffect(()=>{
+    let alive=true;
+    const references=graph.nodes.filter(node=>node.type==='media.image-reference'&&String(node.config.sourcePath??'').trim());
+    void Promise.all(references.map(async node=>{
+      try{return [node.id,await window.znith.files.previewImage(String(node.config.sourcePath))] as const;}catch{return null;}
+    })).then(entries=>{if(alive)setReferencePreviews(Object.fromEntries(entries.filter((entry):entry is readonly [string,MediaPreview]=>entry!==null)));});
+    return()=>{alive=false;};
+  },[referencePreviewKey]);
 
   useEffect(()=>{
     let alive=true;
@@ -127,11 +140,11 @@ function AppContent() {
     return {id:n.id,type:'znith',position:n.position,selected:n.id===selectedId,
       data:{label:NODE_DEFINITIONS.find(def=>def.type===n.type)?.label??n.type,nodeType:n.type,
         status:run?.nodes.find(x=>x.nodeId===n.id)?.status,prompt:String(n.config.prompt??''),provider,
-        mediaPreview:(run?.nodes.find(x=>x.nodeId===n.id)?.outputRefs??[]).map(ref=>previews[ref.id]).find(Boolean),
+        mediaPreview:referencePreviews[n.id]??(run?.nodes.find(x=>x.nodeId===n.id)?.outputRefs??[]).map(ref=>previews[ref.id]).find(Boolean),
         onPromptChange:(value:string)=>updateNodeConfig(n.id,'prompt',value),onRun:()=>void start(n.id),
         onDuplicate:()=>duplicateNode(n.id),onBranch:()=>openBranchPicker(n.id),
         onSettings:()=>{setSelectedId(n.id);setInspectorOpen(true);},onDelete:()=>deleteNode(n.id)}};
-  }),[graph.nodes,selectedId,run,previews]);
+  }),[graph.nodes,selectedId,run,previews,referencePreviews]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     id:e.id,source:e.source,target:e.target,sourceHandle:e.sourceHandle,targetHandle:e.targetHandle,
     type:'smoothstep',animated:run?.nodes.some(n=>n.nodeId===e.target&&n.status==='RUNNING')??false,
@@ -211,24 +224,21 @@ function AppContent() {
       setRevision(newRevision);setDirty(false);setNotice(`Saved revision ${newRevision}`);return true;
     } catch(e){setError(String(e));return false;} finally{setSaving(false);}
   };
-  const backToWorkflows=async()=>{
-    if(dirty&&!await save())return;
+  const backToWorkflows=()=>{
+    if(dirty){setError('Save your workflow before leaving. Nothing has been saved yet.');return;}
     window.history.pushState(null,'','/workflows');setView('management');setSelectedId(null);setInspectorOpen(false);
   };
   const start=async(nodeId?:string)=>{
     if(!project)return;
     setError('');setNotice('');
     try {
+      if(dirty){setError('Save your workflow before running it. The run will use the last saved version.');return;}
       if(!nodeId){
         const validation=await window.znith.workflows.validate(graph);
         if(!validation.valid){setError(validation.errors.join('\n'));return;}
       }
-      if(dirty) {
-        const next=await window.znith.workflows.save(project.project.workflowId,graph,revision);
-        setRevision(next);setDirty(false);
-      }
       const id=await window.znith.runs.start(project.project.workflowId,nodeId);
-      setRunId(id);setArtifactText('');setNotice(nodeId?'Node and its upstream inputs started':'Workflow started');
+      setRun(null);setRunId(id);setArtifactText('');setNotice(nodeId?'Node and its upstream inputs started':'Workflow started');
     }catch(e){setError(String(e));}
   };
   const showArtifact=async(artifactId:string)=>{
@@ -277,7 +287,7 @@ function AppContent() {
         {selectedNode&&<>
           <div className="inspector-drawer-head"><div><span className="eyebrow">NODE SETTINGS</span><h3>{selectedDefinition?.label??selectedNode.type}</h3></div><button className="drawer-close" onClick={()=>setInspectorOpen(false)}>×</button></div>
           <p className="inspector-node-id">{selectedNode.type} · {selectedNode.id}</p>
-          {selectedNode.type==='media.image-reference'&&<><label className="field-title">Reference image</label><div className="image-path-row"><input className="field" value={String(selectedNode.config.sourcePath??'')} placeholder="Choose a local image…" readOnly/><button className="ghost" onClick={()=>void window.znith.files.pickImage().then(path=>{if(path)updateConfig('sourcePath',path);}).catch(e=>setError(String(e)))}>Browse</button></div><p className="muted tiny">PNG, JPG or WebP · max 8 MiB. Znith copies the selected image into the project when this node runs.</p></>}
+          {selectedNode.type==='media.image-reference'&&<><label className="field-title">Reference image</label><div className="image-path-row"><input className="field" value={String(selectedNode.config.sourcePath??'')} placeholder="Choose a local image…" readOnly/><button className="ghost" onClick={()=>{const nodeId=selectedNode.id;void window.znith.files.pickImage().then(async path=>{if(!path)return;const preview=await window.znith.files.previewImage(path);updateNodeConfig(nodeId,'sourcePath',path);setReferencePreviews(previous=>({...previous,[nodeId]:preview}));}).catch(e=>setError(String(e)));}}>Browse</button></div>{referencePreviews[selectedNode.id]&&<img className="reference-image-preview" src={referencePreviews[selectedNode.id].dataUrl} alt="Selected reference"/>}<p className="muted tiny">PNG, JPG or WebP · max 8 MiB. Znith copies the selected image into the project when this node runs.</p></>}
           <label className="field-title">Runtime</label>
           <select className="field" value={selectedNode.runtime} onChange={e=>changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:e.target.value as GraphNode['runtime']}:n)}))}><option value="local">Local</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (explicit opt-in)</option></select>
           {selectedNode.type==='media.audio-generate'&&<><label className="field-title">Narration mode</label><select className="field" value={String(selectedNode.config.executionMode??'piper')} onChange={e=>updateConfig('executionMode',e.target.value)}><option value="piper">Piper · local text-to-speech</option><option value="mock">Mock · sample data</option></select>{selectedNode.config.executionMode!=='mock'&&<><label className="field-title">Piper voice model path</label><input className="field" value={String(selectedNode.config.voiceModelPath??'')} placeholder="Absolute path to voice .onnx" onChange={e=>updateConfig('voiceModelPath',e.target.value)}/></>}</>}

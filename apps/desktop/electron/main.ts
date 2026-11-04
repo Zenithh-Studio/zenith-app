@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ZnithDatabase } from '@znith/database';
 import { LocalScheduler, secureArtifactPath } from '@znith/local-runner';
-import { graphSchema } from '@znith/contracts';
+import { graphSchema, type MediaPreview } from '@znith/contracts';
 import { validateGraph } from '@znith/workflow-engine';
 
 let database:ZnithDatabase;
@@ -39,6 +39,16 @@ function registerIPC():void {
   ipcMain.handle('files:pick-image',async()=>{
     const result=await dialog.showOpenDialog(mainWindow!,{title:'Choose a reference image',properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});
     return result.canceled?null:result.filePaths[0]??null;
+  });
+  ipcMain.handle('files:preview-image',async(_e,path:unknown):Promise<MediaPreview>=>{
+    const absolute=resolve(z.string().trim().min(1).max(4096).parse(path));
+    const ext=extname(absolute).toLowerCase();
+    const mimeTypes:Record<string,string>={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'};
+    const mimeType=mimeTypes[ext];
+    if(!mimeType)throw new Error('Reference images must be PNG, JPG, or WebP');
+    const content=await readFile(absolute);
+    if(content.byteLength>8*1024*1024)throw new Error('Reference image is limited to 8 MiB');
+    return {mimeType,dataUrl:`data:${mimeType};base64,${content.toString('base64')}`};
   });
   ipcMain.handle('projects:list',()=>database.listProjects());
   ipcMain.handle('projects:create',(_e,name:unknown)=>database.createProject(projectNameSchema.parse(name)));
