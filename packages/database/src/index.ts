@@ -77,6 +77,9 @@ export class ZnithDatabase {
     });
     return id;
   }
+  latestRunId(workflowId:string):string|null {
+    return this.db.select().from(workflowRuns).where(eq(workflowRuns.workflowId,workflowId)).orderBy(desc(workflowRuns.createdAt)).limit(1).get()?.id??null;
+  }
   getRun(id:string):RunSnapshot {
     const run=this.db.select().from(workflowRuns).where(eq(workflowRuns.id,id)).get();
     if(!run) throw new Error('Run not found');

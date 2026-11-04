@@ -100,10 +100,12 @@ export interface ZnithAPI {
   };
   runs: {
     start(id: string): Promise<string>;
+    latest(workflowId: string): Promise<string | null>;
     get(id: string): Promise<RunSnapshot>;
     cancel(id: string): Promise<void>;
     retryNode(id: string): Promise<void>;
+    approveNode(id: string, approved: boolean): Promise<void>;
     subscribe(id: string, callback: (event: RunEvent) => void): () => void;
   };
-  artifacts: { readText(id: string): Promise<string> };
+  artifacts: { readText(id: string): Promise<string>; reveal(id:string): Promise<void> };
 }

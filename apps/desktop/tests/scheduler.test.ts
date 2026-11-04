@@ -46,3 +46,31 @@ test('project graph persists after closing SQLite',async()=>{
     reopened.close();
   } finally {await rm(root,{recursive:true,force:true});}
 });
+
+test('approval gate pauses a persisted run and resumes only after user approval',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'znith-approval-'));
+  const db=new ZnithDatabase(join(root,'state.sqlite'),join(root,'projects'));
+  const scheduler=new LocalScheduler(db);
+  try{
+    const project=db.createProject('Approval Film');
+    const graph=structuredClone(project.graph);
+    graph.nodes.push({id:'approval',type:'logic.approval',position:{x:1050,y:165},config:{},runtime:'local'});
+    graph.edges.push({id:'storyboard-approval',source:'storyboard',sourceHandle:'shots',target:'approval',targetHandle:'shots'});
+    db.saveWorkflow(project.project.workflowId,graph,1);
+    scheduler.start();
+    const runId=scheduler.startRun(project.project.workflowId);
+    let snapshot=db.getRun(runId);
+    for(let i=0;i<100 && snapshot.status!=='WAITING_APPROVAL';i++){
+      await delay(50);snapshot=db.getRun(runId);
+    }
+    assert.equal(snapshot.status,'WAITING_APPROVAL');
+    const gate=snapshot.nodes.find(n=>n.nodeId==='approval');
+    assert.equal(gate?.status,'WAITING_APPROVAL');
+    scheduler.approveNode(gate!.id,true);
+    for(let i=0;i<60 && snapshot.status!=='SUCCEEDED';i++){
+      await delay(50);snapshot=db.getRun(runId);
+    }
+    assert.equal(snapshot.status,'SUCCEEDED');
+    assert.equal(db.latestRunId(project.project.workflowId),runId);
+  }finally{scheduler.stop();await scheduler.waitForIdle();db.close();await rm(root,{recursive:true,force:true});}
+});

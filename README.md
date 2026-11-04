@@ -1,5 +1,8 @@
 # Znith Desktop — MVP Phase 1+2
 
+> **Development update (v0.3 branch):** Real Ollama text, user-approved storyboards, model-specific ComfyUI image/video, offline Piper TTS, FFmpeg MP4 export, and optional Reelbench analysis adapters have been implemented behind explicit per-node execution modes. See [Desktop AI Pipeline Guide](docs/DESKTOP_AI_PIPELINE.md). Mock remains the default. This branch still needs live model/installer testing and does not bundle model weights or upstream scripts.
+
+
 **Local-first AI Filmmaking Node Canvas** built with Electron, React, Vite, React Flow, SQLite, Drizzle ORM and a persistent local DAG scheduler. Runs **offline mock nodes** for Story → Script → Storyboard; no Docker, PostgreSQL, Redis, MinIO, Ollama, ComfyUI, cloud key or account needed for this phase.
 
 > **Scope:** This is a working-source MVP scaffold, **not** a production-ready installer or real video generator. AI models, approval actions, batch fan-out, video/audio generation, signed installers and cloud providers are **not** implemented. Media node mock outputs are JSON placeholders, **not actual image/video files**.
@@ -19,7 +22,7 @@ pnpm install
 pnpm dev
 ```
 
-The app creates its own SQLite database, **no server needed**. On first launch it creates **First Film** with three connected nodes, all using deterministic mock executors. Hit **Run Mock**, select a node, and click **View ... JSON** to inspect its saved artifact. Click **Save** after editing the canvas.
+The app creates its own SQLite database, **no server needed**. AI text/media modes require separately installed local services or explicitly configured cloud credentials. On first launch it creates **First Film** with three connected nodes, all using deterministic mock executors. Hit **Run Mock**, select a node, and click **View ... JSON** to inspect its saved artifact. Click **Save** after editing the canvas.
 
 ### Build and test
 

@@ -6,6 +6,10 @@ import type { ArtifactRef, ArtifactType, GraphNode, RunEvent, RunStatus, Workflo
 import { validateGraph } from '@znith/workflow-engine';
 import type { ZnithDatabase } from '@znith/database';
 import { NODE_REGISTRY } from '@znith/node-registry';
+import { OllamaClient, OpenAICompatibleClient } from '@znith/providers';
+import { skillForNode, validateSkillOutput } from '@znith/skill-runtime';
+import { collectClipManifest, exportLocalFilm, runComfyMedia, runPiperAudio } from './media';
+export { collectClipManifest } from './media';
 
 const PAUSE_MS = 180;
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((res, rej)=>{
@@ -27,7 +31,12 @@ export class LocalScheduler extends EventEmitter {
     // Only mock executions are safe to replay: no external side effects or paid requests.
     for(const id of this.db.listUnfinishedRuns()) {
       for(const row of this.db.getRunRows(id)) {
-        if(row.status==='RUNNING') this.db.transitionNode(row.id,'RUNNING','READY');
+        if(row.status==='RUNNING') {
+          const node=this.db.getRunGraph(id).nodes.find(n=>n.id===row.nodeId);
+          if(!node || (node.config.executionMode && node.config.executionMode!=='mock')) {
+            this.db.updateNode(row.id,{status:'FAILED',error:'Interrupted real provider job. Inspect provider state before retrying to avoid duplicate charges or renders.'});
+          } else this.db.transitionNode(row.id,'RUNNING','READY');
+        }
       }
     }
     if(!this.timer) this.timer=setInterval(()=>void this.tick(),250);
@@ -78,6 +87,25 @@ export class LocalScheduler extends EventEmitter {
     this.db.updateNode(row.id,{status:'PENDING',error:null});
     this.db.setRunStatus(row.runId,'RUNNING');
     this.emitChange(row.runId);
+    void this.tick();
+  }
+  approveNode(nodeRunId:string, approved:boolean):void {
+    const row=this.db.sqlite.prepare('SELECT id, workflow_run_id AS runId, node_id AS nodeId, status FROM node_runs WHERE id=?')
+      .get(nodeRunId) as {id:string;runId:string;nodeId:string;status:string}|undefined;
+    if(!row || row.status!=='WAITING_APPROVAL') throw new Error('Node is not waiting for approval');
+    const graph=this.db.getRunGraph(row.runId);
+    const node=graph.nodes.find(n=>n.id===row.nodeId);
+    if(node?.type!=='logic.approval') throw new Error('Only Approval Gate nodes can be approved');
+    if(!approved) {
+      this.db.updateNode(row.id,{status:'FAILED',error:'Storyboard rejected by user'});
+    } else {
+      const upstream=graph.edges.filter(e=>e.target===row.nodeId)
+        .flatMap(e=>this.db.getRun(row.runId).nodes.find(n=>n.nodeId===e.source)?.outputRefs??[]);
+      if(upstream.length===0) throw new Error('Approval Gate has no storyboard artifact');
+      this.db.updateNode(row.id,{status:'SUCCEEDED',outputRefs:upstream,error:null});
+    }
+    this.db.setRunStatus(row.runId,'RUNNING');
+    this.emitChange(row.runId,'run-updated');
     void this.tick();
   }
   private async tick(): Promise<void> {
@@ -137,20 +165,47 @@ export class LocalScheduler extends EventEmitter {
   }
   private async execute(runId:string,nodeRunId:string,node:GraphNode,graph:WorkflowGraph,signal:AbortSignal):Promise<void> {
     try {
-      if(node.runtime==='cloud') throw new Error('Cloud provider is not implemented in Phase 1+2');
+      if(node.runtime==='cloud' && node.config.executionMode!=='cloud') throw new Error('Explicit cloud executionMode required for remote processing');
       await wait(PAUSE_MS,signal);
       const project=this.db.projectForRun(runId);
       const inputByPort:Record<string, unknown>={};
       const inputRefs:ArtifactRef[]=[];
       for(const edge of graph.edges.filter(e=>e.target===node.id)) {
         const source=this.db.getRun(runId).nodes.find(r=>r.nodeId===edge.source);
-        const artifact=source?.outputRefs.find(a=>a.type===NODE_REGISTRY.get(graph.nodes.find(n=>n.id===edge.source)!.type)?.outputs.find(p=>p.id===edge.sourceHandle)?.type);
-        if(!artifact) throw new Error(`Missing upstream artifact for ${edge.id}`);
-        inputRefs.push(artifact);
-        const raw=await readFile(secureArtifactPath(project.rootPath,artifact.relativePath),'utf8');
-        inputByPort[edge.targetHandle]=JSON.parse(raw);
+        const artifactType=NODE_REGISTRY.get(graph.nodes.find(n=>n.id===edge.source)!.type)?.outputs.find(p=>p.id===edge.sourceHandle)?.type;
+        const found=source?.outputRefs.filter(a=>a.type===artifactType)??[];
+        if(!found.length) throw new Error(`Missing upstream artifact for ${edge.id}`);
+        inputRefs.push(...found);
+        const payloads:unknown[]=[];
+        for(const artifact of found){
+          if(['image','video','audio','film'].includes(artifact.type)) payloads.push(artifact);
+          else {
+            const raw=await readFile(secureArtifactPath(project.rootPath,artifact.relativePath),'utf8');
+            payloads.push(JSON.parse(raw));
+          }
+        }
+        const targetPort=NODE_REGISTRY.get(node.type)?.inputs.find(p=>p.id===edge.targetHandle);
+        if(targetPort?.multiple || payloads.length>1) {
+          const previous=inputByPort[edge.targetHandle];
+          inputByPort[edge.targetHandle]=[...(Array.isArray(previous)?previous:previous===undefined?[]:[previous]),...payloads];
+        } else inputByPort[edge.targetHandle]=payloads[0];
       }
-      const produced=mockNode(node,inputByPort);
+      const mode=String(node.config.executionMode??'mock');
+      if ((mode==='comfyui' && ['media.image-generate','media.video-generate'].includes(node.type)) ||
+          (mode==='ffmpeg' && node.type==='media.film-export') ||
+          (mode==='piper' && node.type==='media.audio-generate')) {
+        const mediaContext={node,inputs:inputByPort,runId,projectRoot:project.rootPath,signal};
+        const results=mode==='comfyui' ? await runComfyMedia(mediaContext) : mode==='piper' ? [await runPiperAudio(mediaContext)] : [await exportLocalFilm(mediaContext)];
+        if(signal.aborted || this.db.getRun(runId).status==='CANCELLED') {
+          this.db.updateNode(nodeRunId,{status:'CANCELLED',error:'Cancelled'});
+          return;
+        }
+        for(const artifact of results)this.db.insertArtifact(project.id,nodeRunId,artifact);
+        this.db.updateNode(nodeRunId,{status:'SUCCEEDED',inputRefs,outputRefs:results,error:null});
+        this.emitChange(runId);
+        return;
+      }
+            const produced=await executeFilmNode(node,inputByPort,signal);
       const outputPort=NODE_REGISTRY.get(node.type)?.outputs[0];
       if(!outputPort) throw new Error(`Node type ${node.type} is missing its output port`);
       const rel=`artifacts/${runId}/${node.id.replace(/[^a-zA-Z0-9_-]/g,'_')}/${randomUUID()}.json`;
@@ -167,7 +222,7 @@ export class LocalScheduler extends EventEmitter {
         return;
       }
       const artifact:ArtifactRef={id:randomUUID(),type:outputPort.type,relativePath:rel,
-        checksum:createHash('sha256').update(output).digest('hex'),metadata:{mock:true,nodeType:node.type}};
+        checksum:createHash('sha256').update(output).digest('hex'),metadata:{mock:node.config.executionMode===undefined || node.config.executionMode==='mock',nodeType:node.type}};
       this.db.insertArtifact(project.id,nodeRunId,artifact);
       this.db.updateNode(nodeRunId,{status:'SUCCEEDED',inputRefs,outputRefs:[artifact],error:null});
       this.emitChange(runId);
@@ -206,4 +261,25 @@ export function mockNode(node:GraphNode,inputs:Record<string,unknown>):unknown {
     case 'logic.batch-shots':return {tasks:Array.isArray((source as any).shots)?(source as any).shots:[],mock:true};
     default:return {nodeType:node.type,inputs,placeholder:'Mock output only; media is not generated in Phase 1+2',mock:true};
   }
+}
+
+/** AI text execution is opt-in; the default stays offline and deterministic. */
+export async function executeFilmNode(node: GraphNode, inputs: Record<string,unknown>, signal: AbortSignal): Promise<unknown> {
+  const mode=String(node.config.executionMode??'mock');
+  if(mode==='mock') {
+    if(node.type==='logic.collect-clips' && Array.isArray(inputs.video) && inputs.video.some(x=>x && typeof x==='object' && 'relativePath' in x)) return collectClipManifest(inputs);
+    return mockNode(node,inputs);
+  }
+  const skill=skillForNode(node.type);
+  if(!skill) throw new Error(`Node ${node.type} does not yet have a real ${mode} executor; choose mock or configure a supported provider`);
+  const model=String(node.config.model??'');
+  if(!model) throw new Error('Set the model name in the node Inspector before running AI');
+  const output=mode==='ollama'
+    ? await new OllamaClient(String(node.config.endpoint??'http://127.0.0.1:11434')).generateJSON(model,skill.instructions,inputs,signal)
+    : mode==='cloud'
+      ? await new OpenAICompatibleClient(process.env.ZNITH_CLOUD_LLM_API_KEY??'').generateJSON(model,skill.instructions,inputs,signal)
+      : null;
+  if(!output) throw new Error('Unsupported executionMode: '+mode);
+  validateSkillOutput(skill.id,output);
+  return output;
 }
