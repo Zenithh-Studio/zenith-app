@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { ArtifactRef, GraphNode } from '@znith/contracts';
 import { ComfyUIClient, injectWorkflowTokens } from '@znith/providers';
 import { exportFilm } from '@znith/media-engine';
+import { synthesizePiper } from '@znith/media-engine/piper';
 import { secureArtifactPath } from './index';
 
 type Inputs = Record<string, unknown>;
@@ -80,7 +81,23 @@ export async function exportLocalFilm(ctx:MediaContext):Promise<ArtifactRef>{
   const filenames=clips.map(clip=>secureArtifactPath(ctx.projectRoot,String(clip.relativePath)));
   const relativePath='exports/'+ctx.runId+'-'+ctx.node.id.replace(/[^a-zA-Z0-9_-]/g,'_')+'.mp4';
   const absolute=secureArtifactPath(ctx.projectRoot,relativePath);
-  await exportFilm({clips:filenames,output:absolute,signal:ctx.signal});
+  const audio=asRecord(ctx.inputs.audio);
+  const audioPath=typeof audio.relativePath==='string'?secureArtifactPath(ctx.projectRoot,audio.relativePath):undefined;
+  await exportFilm({clips:filenames,output:absolute,audio:audioPath,signal:ctx.signal});
   const bytes=await readFile(absolute);
   return {id:randomUUID(),type:'film',relativePath,checksum:createHash('sha256').update(bytes).digest('hex'),metadata:{clips:clips.length,generated:true}};
+}
+
+/** Offline Piper narration; only spoken screenplay dialogue is used as TTS input. */
+export async function runPiperAudio(ctx:MediaContext):Promise<ArtifactRef> {
+  const script=asRecord(ctx.inputs.script);
+  const scenes=list(script.scenes).map(asRecord);
+  const text=scenes.map(scene=>String(scene.dialogue??'')).filter(Boolean).join('\n\n');
+  const model=String(ctx.node.config.voiceModelPath??'');
+  if(!model)throw new Error('Choose a local Piper ONNX voice model path');
+  const relativePath='artifacts/'+ctx.runId+'/'+ctx.node.id.replace(/[^a-zA-Z0-9_-]/g,'_')+'/narration.wav';
+  const absolute=secureArtifactPath(ctx.projectRoot,relativePath);
+  await synthesizePiper({text,modelPath:model,output:absolute,signal:ctx.signal});
+  const bytes=await readFile(absolute);
+  return {id:randomUUID(),type:'audio',relativePath,checksum:createHash('sha256').update(bytes).digest('hex'),metadata:{generated:true,engine:'piper'}};
 }
