@@ -20,7 +20,7 @@ function FlowNode(props:NodeProps) {
   const isMedia=isImage||isVideo||definition.outputs.some(p=>['audio','film'].includes(p.type));
   return <div className={`studio-node ${isMedia?'media-node':''} ${isPrompt?'prompt-node':''} ${props.selected?'selected':''}`} style={{'--node-tint':tint} as CSSProperties}>
     <NodeToolbar isVisible={props.selected} position={Position.Top} align="center" className="node-actions">
-      <button title="Run workflow" onClick={e=>{e.stopPropagation();data.onRun?.();}}>▶</button>
+      <button title="Run this node and its upstream inputs" onClick={e=>{e.stopPropagation();data.onRun?.();}}>▶</button>
       <button title="Create branch" onClick={e=>{e.stopPropagation();data.onBranch?.();}}>⑂</button>
       <button title="Node settings" onClick={e=>{e.stopPropagation();data.onSettings?.();}}>⚙</button>
       <button title="Duplicate node" onClick={e=>{e.stopPropagation();data.onDuplicate?.();}}>▢</button>
@@ -40,7 +40,7 @@ function FlowNode(props:NodeProps) {
          data.mediaPreview?.mimeType.startsWith('image/')?<img src={data.mediaPreview.dataUrl} alt="Latest generated media"/>:
          <div className="media-empty"><span>{isVideo?'▶':'▧'}</span><small>{data.status==='RUNNING'?'Generating…':isVideo?'Video preview will appear here':'Add a reference image or run this node'}</small></div>}
       </div>
-      <div className="node-provider"><span className="provider-spark">✦</span>{String((props.data as FlowNodeData & {provider?:string}).provider??'Local · Mock')}</div>
+      <div className="node-provider"><span className="provider-spark">✦</span>{String((props.data as FlowNodeData & {provider?:string}).provider??'Configure provider')}</div>
     </>:<div className="node-summary">{definition.description}</div>}
     {(definition.inputs.length>0||definition.outputs.length>0)&&<div className="studio-node-ports">
       <div className="studio-port-column">{definition.inputs.map(port=><div className="studio-port-row" key={port.id}><Handle type="target" position={Position.Left} id={port.id} className="typed-handle input-handle" style={{background:tint}}/><span>{port.id}{port.required?' *':''}</span></div>)}</div>
