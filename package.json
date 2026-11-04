@@ -1,0 +1,15 @@
+{
+  "name": "znith-desktop-monorepo",
+  "version": "0.2.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.2",
+  "scripts": {
+    "dev": "pnpm --filter @znith/desktop dev",
+    "build": "pnpm --filter @znith/desktop build",
+    "typecheck": "pnpm --filter @znith/desktop typecheck",
+    "test": "pnpm --filter @znith/desktop test",
+    "check:offline": "node scripts/check-offline.mjs",
+    "package:dir": "pnpm --filter @znith/desktop package:dir"
+  },
+  "engines": { "node": ">=22" }
+}
