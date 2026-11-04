@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseModelJSON, localEndpoint, injectWorkflowTokens } from '@znith/providers';
 import { skillForNode, validateSkillOutput } from '@znith/skill-runtime';
-import { collectClipManifest } from '@znith/local-runner/src/media';
+import { collectClipManifest } from '@znith/local-runner';
 
 test('Ollama structured response extracts JSON safely',()=>{
   assert.deepEqual(parseModelJSON('```json\n{"beats":[1]}\n```'),{beats:[1]});
