@@ -1,6 +1,6 @@
 # Znith Desktop v0.3 — Hybrid AI pipeline (development)
 
-The 12-node desktop canvas stays local-first. Real AI is an **explicit per-node opt-in**. Mock execution remains the default.
+The desktop canvas stays local-first. New nodes default to their real local provider, and mock sample output must be selected explicitly in the node inspector.
 
 ## What works in this branch
 
@@ -27,8 +27,8 @@ pnpm dev
 ### Real text output through Ollama
 
 1. Install Ollama, run `ollama serve`, and pull a suitable model (e.g. `ollama pull qwen2.5:7b`).
-2. Select an Outline/Script/Characters/Storyboard node; choose **AI execution mode → Ollama**.
-3. Set **Model name** to a locally installed Ollama model.
+2. Add a Text Prompt and connect it to an Outline, Script, Characters, or Storyboard node.
+3. The AI node is set to Ollama by default. Set **Model** to a locally installed model name in its inspector.
 4. Save the graph, then run. Output JSON will be validated for minimal schema requirements.
 
 These prompts are **Znith compatibility adapters**, not a completed execution of every original upstream `shuohao-skills` shell script or quality gate. Full upstream script integration and validation remain outstanding.
@@ -46,7 +46,7 @@ Set `ZNITH_CLOUD_LLM_API_KEY` in the Electron main process environment. On a ski
 5. Build a full graph including `Batch Shots → Image → Video → Collect Clips → Film Export`; select FFmpeg mode on Film Export.
 6. Make sure the Comfy workflow uses SaveImage PNG or an MP4-capable video output node. Comfy custom nodes, checkpoint models and VRAM requirements depend on your workflow.
 
-**Important:** Video generation, ComfyUI custom nodes, models and FFmpeg availability are not bundled with the app. There is no automatic model installation, native installer verification, TTS pipeline or cloud image/video provider yet. Image/video batch runs currently handle tasks sequentially.
+**Important:** Video generation, ComfyUI custom nodes, models and FFmpeg availability are not bundled with the app. There is no automatic model installation, native installer verification or cloud image/video provider yet. Image/video batch runs currently handle tasks sequentially.
 
 ### Safety
 

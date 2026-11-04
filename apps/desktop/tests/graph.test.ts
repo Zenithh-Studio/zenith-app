@@ -1,22 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeDemoGraph, makeVisualWorkflowGraph, NODE_DEFINITIONS } from '@znith/node-registry';
-import { validateGraph } from '@znith/workflow-engine';
+import { makeDemoGraph, makeEmptyGraph, NODE_DEFINITIONS } from '@znith/node-registry';
+import { graphThroughNode, validateGraph } from '@znith/workflow-engine';
 
 test('registry contains 13 distinct workflow node definitions',()=>{
   assert.equal(NODE_DEFINITIONS.length,13);
   assert.equal(new Set(NODE_DEFINITIONS.map(n=>n.type)).size,13);
 });
-test('default Story → Script → Storyboard is valid',()=>{
+test('sample Story → Script → Storyboard graph is valid',()=>{
   const result=validateGraph(makeDemoGraph());
   assert.deepEqual(result.errors,[]);
   assert.equal(result.valid,true);
 });
-test('visual video starter has seven connected nodes and a valid typed graph',()=>{
-  const graph=makeVisualWorkflowGraph();
-  assert.equal(graph.nodes.length,7);
+test('new workflows start empty without generated sample content',()=>{
+  const graph=makeEmptyGraph();
+  assert.deepEqual(graph,{schemaVersion:2,nodes:[],edges:[]});
   assert.equal(validateGraph(graph).valid,true);
-  assert.equal(graph.edges.length,7);
+});
+test('node execution includes only the selected node and its upstream inputs',()=>{
+  const graph=graphThroughNode(makeDemoGraph(),'script');
+  assert.deepEqual(graph.nodes.map(node=>node.id),['story','script']);
+  assert.deepEqual(graph.edges.map(edge=>edge.id),['story-script']);
+  assert.equal(validateGraph(graph).valid,true);
 });
 test('validator rejects a cyclic graph',()=>{
   const graph=makeDemoGraph();

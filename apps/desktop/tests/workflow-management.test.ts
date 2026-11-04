@@ -13,12 +13,12 @@ test('workflow management supports list, rename, duplicate, and safe deletion',(
     const originalId=project.project.workflowId;
     const created=database.createWorkflow(project.project.id,'Storyboard Pass');
     assert.equal(database.listWorkflows().length,2);
-    assert.equal(database.openWorkflow(created.project.workflowId).graph.nodes.length,7);
+    assert.equal(database.openWorkflow(created.project.workflowId).graph.nodes.length,0);
     database.renameWorkflow(created.project.workflowId,'Final Cut Workflow');
     assert.equal(database.listWorkflows().find(w=>w.id===created.project.workflowId)?.name,'Final Cut Workflow');
 
     const copy=database.duplicateWorkflow(created.project.workflowId,'Final Cut Copy');
-    assert.equal(database.openWorkflow(copy.project.workflowId).graph.nodes.length,7);
+    assert.equal(database.openWorkflow(copy.project.workflowId).graph.nodes.length,0);
     database.deleteWorkflow(copy.project.workflowId);
     database.deleteWorkflow(created.project.workflowId);
     assert.deepEqual(database.listWorkflows().map(w=>w.id),[originalId]);

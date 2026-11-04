@@ -4,15 +4,20 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ZnithDatabase } from '@znith/database';
-import { LocalScheduler, secureArtifactPath } from '@znith/local-runner';
+import { executeFilmNode, LocalScheduler, secureArtifactPath } from '@znith/local-runner';
+import { makeDemoGraph } from '@znith/node-registry';
 
 const delay=(ms:number)=>new Promise<void>(res=>setTimeout(res,ms));
+test('AI action requires a real configured model unless mock mode is explicitly selected',async()=>{
+  await assert.rejects(()=>executeFilmNode({id:'outline',type:'film.outline',position:{x:0,y:0},config:{},runtime:'local'},{},new AbortController().signal),/Set the model name/);
+});
 test('persistent mock workflow saves generated JSON artifacts',async()=>{
   const root=await mkdtemp(join(tmpdir(),'znith-test-'));
   const db=new ZnithDatabase(join(root,'state.sqlite'),join(root,'projects'));
   const scheduler=new LocalScheduler(db);
   try {
     const project=db.createProject('Test Film');
+    db.saveWorkflow(project.project.workflowId,makeDemoGraph(),1);
     scheduler.start();
     const runId=scheduler.startRun(project.project.workflowId);
     let snapshot=db.getRun(runId);
@@ -26,7 +31,8 @@ test('persistent mock workflow saves generated JSON artifacts',async()=>{
       assert.equal(node.outputRefs.length,1);
       const artifact=node.outputRefs[0];
       const content=JSON.parse(await readFile(secureArtifactPath(project.project.rootPath,artifact.relativePath),'utf8'));
-      assert.equal(content.mock,true);
+      if(node.nodeId==='script'||node.nodeId==='storyboard')assert.equal(content.mock,true);
+      if(node.nodeId==='story')assert.equal(content.prompt.length>0,true);
       if(node.nodeId==='storyboard') assert.equal(content.shots.length,5);
     }
   } finally {scheduler.stop();db.close();await rm(root,{recursive:true,force:true});}
@@ -53,7 +59,7 @@ test('approval gate pauses a persisted run and resumes only after user approval'
   const scheduler=new LocalScheduler(db);
   try{
     const project=db.createProject('Approval Film');
-    const graph=structuredClone(project.graph);
+    const graph=makeDemoGraph();
     graph.nodes.push({id:'approval',type:'logic.approval',position:{x:1050,y:165},config:{},runtime:'local'});
     graph.edges.push({id:'storyboard-approval',source:'storyboard',sourceHandle:'shots',target:'approval',targetHandle:'shots'});
     db.saveWorkflow(project.project.workflowId,graph,1);
@@ -72,5 +78,21 @@ test('approval gate pauses a persisted run and resumes only after user approval'
     }
     assert.equal(snapshot.status,'SUCCEEDED');
     assert.equal(db.latestRunId(project.project.workflowId),runId);
+  }finally{scheduler.stop();await scheduler.waitForIdle();db.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('selected node run executes its upstream chain only',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'znith-node-run-'));
+  const db=new ZnithDatabase(join(root,'state.sqlite'),join(root,'projects'));
+  const scheduler=new LocalScheduler(db);
+  try{
+    const project=db.createProject('Node run');
+    db.saveWorkflow(project.project.workflowId,makeDemoGraph(),1);
+    scheduler.start();
+    const runId=scheduler.startRun(project.project.workflowId,'script');
+    let snapshot=db.getRun(runId);
+    for(let i=0;i<100&&!['SUCCEEDED','FAILED'].includes(snapshot.status);i++){await delay(50);snapshot=db.getRun(runId);}
+    assert.equal(snapshot.status,'SUCCEEDED',JSON.stringify(snapshot,null,2));
+    assert.deepEqual(snapshot.nodes.map(node=>node.nodeId).sort(),['script','story']);
   }finally{scheduler.stop();await scheduler.waitForIdle();db.close();await rm(root,{recursive:true,force:true});}
 });
