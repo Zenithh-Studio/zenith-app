@@ -69,5 +69,17 @@ app.whenReady().then(async()=>{
   await createWindow();
   app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)void createWindow();});
 }).catch(error=>{console.error('[znith] Desktop initialization failed',error);app.quit();});
-app.on('before-quit',()=>{ scheduler?.stop();database?.close(); });
+let shutdownStarted=false;
+let shutdownFinished=false;
+app.on('before-quit',event=>{
+  if(shutdownFinished) return;
+  event.preventDefault();
+  if(shutdownStarted) return;
+  shutdownStarted=true;
+  scheduler?.stop();
+  void (async()=>{
+    try { await scheduler?.waitForIdle(); }
+    finally { database?.close();shutdownFinished=true;app.quit(); }
+  })();
+});
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});

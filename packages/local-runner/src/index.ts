@@ -19,9 +19,11 @@ export class LocalScheduler extends EventEmitter {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly active = new Map<string, { runId: string; controller: AbortController }>();
   private ticking = false;
+  private stopped = false;
   private maxConcurrency = 2;
   constructor(private readonly db: ZnithDatabase) { super(); }
   start(): void {
+    this.stopped = false;
     // Only mock executions are safe to replay: no external side effects or paid requests.
     for(const id of this.db.listUnfinishedRuns()) {
       for(const row of this.db.getRunRows(id)) {
@@ -32,9 +34,16 @@ export class LocalScheduler extends EventEmitter {
     void this.tick();
   }
   stop(): void {
+    this.stopped = true;
     if(this.timer) clearInterval(this.timer);
     this.timer=null;
     for(const job of this.active.values()) job.controller.abort();
+  }
+  async waitForIdle(timeoutMs = 3000): Promise<void> {
+    const until = Date.now() + timeoutMs;
+    while (this.active.size > 0 && Date.now() < until) {
+      await new Promise<void>(resolve => setTimeout(resolve, 25));
+    }
   }
   private emitChange(runId:string,kind:RunEvent['kind']='node-updated') {
     this.emit('change',{runId,kind,timestamp:Date.now()} satisfies RunEvent);
@@ -72,7 +81,7 @@ export class LocalScheduler extends EventEmitter {
     void this.tick();
   }
   private async tick(): Promise<void> {
-    if(this.ticking) return;
+    if(this.ticking || this.stopped) return;
     this.ticking=true;
     try {
       for(const runId of this.db.listUnfinishedRuns()) {
@@ -152,7 +161,10 @@ export class LocalScheduler extends EventEmitter {
       await writeFile(temp,output,'utf8');
       await rename(temp,path);
       if(signal.aborted || this.db.getRun(runId).status==='CANCELLED') {
-        await rm(path,{force:true});return;
+        await rm(path,{force:true});
+        const status = this.db.getRun(runId).status==='CANCELLED'?'CANCELLED':'READY';
+        this.db.updateNode(nodeRunId,{status,error:status==='READY'?'Interrupted by app shutdown':null});
+        return;
       }
       const artifact:ArtifactRef={id:randomUUID(),type:outputPort.type,relativePath:rel,
         checksum:createHash('sha256').update(output).digest('hex'),metadata:{mock:true,nodeType:node.type}};
@@ -160,8 +172,9 @@ export class LocalScheduler extends EventEmitter {
       this.db.updateNode(nodeRunId,{status:'SUCCEEDED',inputRefs,outputRefs:[artifact],error:null});
       this.emitChange(runId);
     } catch(error) {
-      const cancelled=signal.aborted || this.db.getRun(runId).status==='CANCELLED';
-      this.db.updateNode(nodeRunId,{status:cancelled?'CANCELLED':'FAILED',error:String(error)});
+      const runCancelled=this.db.getRun(runId).status==='CANCELLED';
+      const interrupted=signal.aborted && !runCancelled;
+      this.db.updateNode(nodeRunId,{status:interrupted?'READY':runCancelled?'CANCELLED':'FAILED',error:interrupted?'Interrupted by app shutdown':String(error)});
       this.emitChange(runId);
     }
   }
