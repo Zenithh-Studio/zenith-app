@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { and, eq, desc } from 'drizzle-orm';
-import { makeDemoGraph } from '@znith/node-registry';
+import { makeDemoGraph, makeVisualWorkflowGraph } from '@znith/node-registry';
 import type { ArtifactRef, ProjectData, ProjectSummary, RunSnapshot, RunStatus, WorkflowGraph, WorkflowSummary } from '@znith/contracts';
 import { projects, workflows, workflowRuns, nodeRuns, artifacts } from './schema';
 
@@ -65,7 +65,12 @@ export class ZnithDatabase {
     writeFileSync(join(rootPath,'project.znith.json'),JSON.stringify({id:projectId,name:safeName,workflowId},null,2));
     return {project:{id:projectId,name:safeName,rootPath,workflowId,createdAt:now},workflowName:'Main Film Workflow',graph,revision:1};
   }
-  ensureDemo(): void { if (this.listProjects().length===0) this.createProject('First Film'); }
+  ensureDemo(): void {
+    if(this.listProjects().length===0){
+      const project=this.createProject('First Film');
+      this.db.update(workflows).set({graph:makeVisualWorkflowGraph()}).where(eq(workflows.id,project.project.workflowId)).run();
+    }
+  }
   openProject(id: string): ProjectData {
     const project = this.listProjects().find(p=>p.id===id);
     if(!project) throw new Error('Project not found');
@@ -86,7 +91,7 @@ export class ZnithDatabase {
     if(!safeName) throw new Error('Workflow name is required');
     const project=this.db.select().from(projects).where(eq(projects.id,projectId)).get();
     if(!project) throw new Error('Project not found');
-    const id=randomUUID(),graph=makeDemoGraph();
+    const id=randomUUID(),graph=makeVisualWorkflowGraph();
     this.db.insert(workflows).values({id,projectId,name:safeName,graph,revision:1}).run();
     this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),projectId);
     return this.openWorkflow(id);

@@ -1,16 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeDemoGraph, NODE_DEFINITIONS } from '@znith/node-registry';
+import { makeDemoGraph, makeVisualWorkflowGraph, NODE_DEFINITIONS } from '@znith/node-registry';
 import { validateGraph } from '@znith/workflow-engine';
 
-test('registry contains 12 distinct MVP definitions',()=>{
-  assert.equal(NODE_DEFINITIONS.length,12);
-  assert.equal(new Set(NODE_DEFINITIONS.map(n=>n.type)).size,12);
+test('registry contains 13 distinct workflow node definitions',()=>{
+  assert.equal(NODE_DEFINITIONS.length,13);
+  assert.equal(new Set(NODE_DEFINITIONS.map(n=>n.type)).size,13);
 });
 test('default Story → Script → Storyboard is valid',()=>{
   const result=validateGraph(makeDemoGraph());
   assert.deepEqual(result.errors,[]);
   assert.equal(result.valid,true);
+});
+test('visual video starter has seven connected nodes and a valid typed graph',()=>{
+  const graph=makeVisualWorkflowGraph();
+  assert.equal(graph.nodes.length,7);
+  assert.equal(validateGraph(graph).valid,true);
+  assert.equal(graph.edges.length,7);
 });
 test('validator rejects a cyclic graph',()=>{
   const graph=makeDemoGraph();

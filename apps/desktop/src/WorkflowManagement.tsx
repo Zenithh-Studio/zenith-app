@@ -41,8 +41,9 @@ export default function WorkflowManagement({onOpen}:Props) {
       let projectId=projects[0]?.id;
       if(!projectId) {
         const first=await window.znith.projects.create('First Film');
-        await window.znith.workflows.rename(first.project.workflowId,name.trim());
-        await refresh();onOpen(first.project.workflowId);return;
+        const created=await window.znith.workflows.create(first.project.id,name.trim());
+        await window.znith.workflows.delete(first.project.workflowId);
+        await refresh();onOpen(created.project.workflowId);return;
       }
       const created=await window.znith.workflows.create(projectId,name.trim());
       await refresh();onOpen(created.project.workflowId);
