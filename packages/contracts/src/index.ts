@@ -55,6 +55,7 @@ export interface ArtifactRef {
   checksum: string;
   metadata: Record<string, unknown>;
 }
+export interface MediaPreview { dataUrl: string; mimeType: string }
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -64,8 +65,21 @@ export interface ProjectSummary {
 }
 export interface ProjectData {
   project: ProjectSummary;
+  workflowName: string;
   graph: WorkflowGraph;
   revision: number;
+}
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  projectId: string;
+  projectName: string;
+  revision: number;
+  updatedAt: number;
+  nodeCount: number;
+  lastRunId: string | null;
+  lastRunStatus: RunStatus | null;
+  lastRunAt: number | null;
 }
 export interface ValidationResult { valid: boolean; errors: string[] }
 export interface NodeRunSnapshot {
@@ -89,12 +103,19 @@ export interface RunEvent {
   timestamp: number;
 }
 export interface ZnithAPI {
+  files: { pickImage():Promise<string|null> };
   projects: {
     list(): Promise<ProjectSummary[]>;
     create(name: string): Promise<ProjectData>;
     open(id: string): Promise<ProjectData>;
   };
   workflows: {
+    list(): Promise<WorkflowSummary[]>;
+    open(id: string): Promise<ProjectData>;
+    create(projectId: string, name: string): Promise<ProjectData>;
+    rename(id: string, name: string): Promise<void>;
+    duplicate(id: string, name: string): Promise<ProjectData>;
+    delete(id: string): Promise<void>;
     save(id: string, graph: WorkflowGraph, expectedRevision: number): Promise<number>;
     validate(graph: WorkflowGraph): Promise<ValidationResult>;
   };
@@ -107,5 +128,5 @@ export interface ZnithAPI {
     approveNode(id: string, approved: boolean): Promise<void>;
     subscribe(id: string, callback: (event: RunEvent) => void): () => void;
   };
-  artifacts: { readText(id: string): Promise<string>; reveal(id:string): Promise<void> };
+  artifacts: { readText(id: string): Promise<string>; preview(id:string):Promise<MediaPreview>; reveal(id:string): Promise<void> };
 }

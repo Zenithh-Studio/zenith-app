@@ -1,34 +1,24 @@
-# Znith Desktop MVP Phase 1+2 — Verification Report
+# Znith AI Visual Workflow Studio — Verification report
 
 Date: 2026-11-04
 
-## Executed successfully in the delivery environment
+## Passed locally with pnpm 10.18.2
 
-1. `node scripts/check-offline.mjs` — parses all TypeScript/TSX source files with TypeScript compiler parser, parses JSON manifests, confirms exactly 12 node definitions, and evaluates a transpiled `mockNode` function to verify story, script, and a 5-shot storyboard.
-2. `python3 scripts/check-sqlite-schema.py` — executes the actual embedded SQLite migration SQL in an in-memory SQLite database, checks expected tables, schema version and foreign-key enforcement.
-3. `git log --oneline` — verifies independent commits for workspace, database/validator, scheduler, Electron integration, renderer UI, tests/docs and fixes.
+- `pnpm install --frozen-lockfile` — dependency install and native builds succeeded.
+- `pnpm typecheck` — renderer, Electron main/preload, and shared packages typecheck successfully.
+- `pnpm test` — 15 tests pass, including workflow CRUD, graph validation, and the seven-node visual video starter.
+- `pnpm build` — Vite renderer and Electron main/preload bundles build successfully.
+- `python3 scripts/check-sqlite-schema.py` — SQLite bootstrap creates the expected tables and enforces foreign keys.
+- `node scripts/check-offline.mjs` — parses TypeScript/TSX and JSON, verifies the 13-node registry and mock story/script/storyboard outputs.
+- The editor now uses a full-screen dotted canvas, draggable image/video and prompt nodes, typed connections, node actions, a searchable node picker, settings drawer, and a seven-node reference-to-video starter. Local image references are copied into project artifacts; generated media previews use the artifact preview IPC.
 
-## Not executable in this environment
+## GitHub Actions
 
-- `pnpm install`: npm registry DNS resolution fails (`EAI_AGAIN registry.npmjs.org`). pnpm is not preinstalled and the package cache is empty.
-- `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm dev`, Electron GUI startup, and `electron-builder`: require dependency installation, Electron/native better-sqlite3 bindings and a desktop runtime. **Not claimed as passed.**
-- End-to-end native installer tests on Windows/macOS/Linux: not performed.
+- Run #78 exposed that pnpm 10.18.2 ignored the newer `allowBuilds` setting, leaving `better-sqlite3` without native bindings.
+- Replaced it with the pnpm 10 compatible `onlyBuiltDependencies` allowlist for `better-sqlite3`, Electron, and esbuild.
+- Run #79 passed on the implementation branch, including install, typecheck, tests, and build: https://github.com/Zenithh-Studio/zenith-app/actions/runs/41792529183
 
-## What to verify on a connected desktop
+## Not verified
 
-```bash
-corepack enable
-corepack prepare pnpm@10.18.2 --activate
-pnpm install
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm dev
-pnpm package:dir
-```
-
-After a successful dependency install, commit the generated `pnpm-lock.yaml` to the repository. The current ZIP intentionally excludes a lockfile because package resolution could not be performed offline.
-
-## Scope disclaimer
-
-The project provides Phase 1+2 mock workflow execution. The registered Image/Video/Audio/Export nodes produce **JSON mock placeholders**, not real media. Ollama, ComfyUI, shuohao-skills and reelbench-skills integrations are planned for subsequent phases and not bundled or claimed functional here.
+- Electron GUI interaction and native installers were not launched in this environment, so pixel-level visual comparison against the reference screenshots is still manual.
+- Live Ollama, ComfyUI, Piper, FFmpeg, and cloud provider execution require separately installed services, models, credentials, or binaries.

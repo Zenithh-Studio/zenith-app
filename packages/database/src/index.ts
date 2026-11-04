@@ -4,8 +4,8 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { and, eq, desc } from 'drizzle-orm';
-import { makeDemoGraph } from '@znith/node-registry';
-import type { ArtifactRef, ProjectData, ProjectSummary, RunSnapshot, RunStatus, WorkflowGraph } from '@znith/contracts';
+import { makeDemoGraph, makeVisualWorkflowGraph } from '@znith/node-registry';
+import type { ArtifactRef, ProjectData, ProjectSummary, RunSnapshot, RunStatus, WorkflowGraph, WorkflowSummary } from '@znith/contracts';
 import { projects, workflows, workflowRuns, nodeRuns, artifacts } from './schema';
 
 export class ZnithDatabase {
@@ -39,6 +39,17 @@ export class ZnithDatabase {
       return {id:row.id,name:row.name,rootPath:row.rootPath,workflowId:w?.id??'',createdAt:row.createdAt};
     });
   }
+  listWorkflows(): WorkflowSummary[] {
+    const projectRows = new Map(this.db.select().from(projects).all().map(row=>[row.id,row]));
+    return this.db.select().from(workflows).all().map(row=>{
+      const project=projectRows.get(row.projectId);
+      const lastRun=this.db.select().from(workflowRuns).where(eq(workflowRuns.workflowId,row.id))
+        .orderBy(desc(workflowRuns.createdAt)).limit(1).get();
+      return {id:row.id,name:row.name,projectId:row.projectId,projectName:project?.name??'Unknown project',
+        revision:row.revision,updatedAt:project?.updatedAt??0,nodeCount:(row.graph as WorkflowGraph).nodes.length,
+        lastRunId:lastRun?.id??null,lastRunStatus:(lastRun?.status as RunStatus|undefined)??null,lastRunAt:lastRun?.createdAt??null};
+    }).sort((a,b)=>b.updatedAt-a.updatedAt);
+  }
   createProject(name: string): ProjectData {
     const safeName = name.trim().slice(0, 100);
     if (!safeName) throw new Error('Project name is required');
@@ -52,21 +63,75 @@ export class ZnithDatabase {
       tx.insert(workflows).values({id:workflowId,projectId,name:'Main Film Workflow',graph,revision:1}).run();
     });
     writeFileSync(join(rootPath,'project.znith.json'),JSON.stringify({id:projectId,name:safeName,workflowId},null,2));
-    return {project:{id:projectId,name:safeName,rootPath,workflowId,createdAt:now},graph,revision:1};
+    return {project:{id:projectId,name:safeName,rootPath,workflowId,createdAt:now},workflowName:'Main Film Workflow',graph,revision:1};
   }
-  ensureDemo(): void { if (this.listProjects().length===0) this.createProject('First Film'); }
+  ensureDemo(): void {
+    if(this.listProjects().length===0){
+      const project=this.createProject('First Film');
+      this.db.update(workflows).set({graph:makeVisualWorkflowGraph()}).where(eq(workflows.id,project.project.workflowId)).run();
+    }
+  }
   openProject(id: string): ProjectData {
     const project = this.listProjects().find(p=>p.id===id);
     if(!project) throw new Error('Project not found');
     const row = this.db.select().from(workflows).where(eq(workflows.id,project.workflowId)).get();
     if(!row) throw new Error('Workflow not found');
-    return { project,graph:row.graph as WorkflowGraph,revision:row.revision };
+    return { project,workflowName:row.name,graph:row.graph as WorkflowGraph,revision:row.revision };
+  }
+  openWorkflow(id:string):ProjectData {
+    const row=this.findWorkflow(id);
+    if(!row) throw new Error('Workflow not found');
+    const project=this.db.select().from(projects).where(eq(projects.id,row.projectId)).get();
+    if(!project) throw new Error('Project not found');
+    return {project:{id:project.id,name:project.name,rootPath:project.rootPath,workflowId:row.id,createdAt:project.createdAt},workflowName:row.name,
+      graph:row.graph as WorkflowGraph,revision:row.revision};
+  }
+  createWorkflow(projectId:string,name:string):ProjectData {
+    const safeName=name.trim().slice(0,100);
+    if(!safeName) throw new Error('Workflow name is required');
+    const project=this.db.select().from(projects).where(eq(projects.id,projectId)).get();
+    if(!project) throw new Error('Project not found');
+    const id=randomUUID(),graph=makeVisualWorkflowGraph();
+    this.db.insert(workflows).values({id,projectId,name:safeName,graph,revision:1}).run();
+    this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),projectId);
+    return this.openWorkflow(id);
+  }
+  renameWorkflow(id:string,name:string):void {
+    const safeName=name.trim().slice(0,100);
+    if(!safeName) throw new Error('Workflow name is required');
+    const row=this.findWorkflow(id);
+    if(!row) throw new Error('Workflow not found');
+    this.db.update(workflows).set({name:safeName}).where(eq(workflows.id,id)).run();
+    this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),row.projectId);
+  }
+  duplicateWorkflow(id:string,name:string):ProjectData {
+    const row=this.findWorkflow(id);
+    if(!row) throw new Error('Workflow not found');
+    const newId=randomUUID();
+    this.db.insert(workflows).values({id:newId,projectId:row.projectId,name:name.trim().slice(0,100)||`${row.name} copy`,
+      graph:JSON.parse(JSON.stringify(row.graph)) as WorkflowGraph,revision:1}).run();
+    this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),row.projectId);
+    return this.openWorkflow(newId);
+  }
+  deleteWorkflow(id:string):void {
+    const row=this.findWorkflow(id);
+    if(!row) throw new Error('Workflow not found');
+    const count=this.db.select().from(workflows).where(eq(workflows.projectId,row.projectId)).all().length;
+    if(count<=1) throw new Error('A project must keep at least one workflow');
+    this.sqlite.transaction(()=>{
+      this.sqlite.prepare('DELETE FROM node_runs WHERE workflow_run_id IN (SELECT id FROM workflow_runs WHERE workflow_id=?)').run(id);
+      this.sqlite.prepare('DELETE FROM workflow_runs WHERE workflow_id=?').run(id);
+      this.sqlite.prepare('DELETE FROM workflows WHERE id=?').run(id);
+    })();
+    this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),row.projectId);
   }
   findWorkflow(id: string) { return this.db.select().from(workflows).where(eq(workflows.id,id)).get(); }
   saveWorkflow(id:string, graph:WorkflowGraph, revision:number):number {
     const updated=this.db.update(workflows).set({graph, revision:revision+1})
       .where(and(eq(workflows.id,id),eq(workflows.revision,revision))).run();
     if(updated.changes===0) throw new Error('Workflow revision conflict. Reload project before saving.');
+    const workflow=this.findWorkflow(id);
+    if(workflow) this.sqlite.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(Date.now(),workflow.projectId);
     return revision+1;
   }
   createRun(workflowId:string,graph:WorkflowGraph):string {

@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join, resolve, sep, dirname } from 'node:path';
+import { extname, join, resolve, sep, dirname } from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { ArtifactRef, ArtifactType, GraphNode, RunEvent, RunStatus, WorkflowGraph } from '@znith/contracts';
 import { validateGraph } from '@znith/workflow-engine';
@@ -191,6 +191,21 @@ export class LocalScheduler extends EventEmitter {
         } else inputByPort[edge.targetHandle]=payloads[0];
       }
       const mode=String(node.config.executionMode??'mock');
+      if(node.type==='media.image-reference'){
+        const source=String(node.config.sourcePath??'').trim();
+        if(!source)throw new Error('Choose a local image file in the node settings');
+        const sourceExt=extname(source).toLowerCase();
+        if(!['.png','.jpg','.jpeg','.webp'].includes(sourceExt))throw new Error('Reference images must be PNG, JPG, or WebP');
+        const bytes=await readFile(resolve(source));
+        if(bytes.byteLength>8*1024*1024)throw new Error('Reference image is limited to 8 MiB');
+        const rel=`artifacts/${runId}/${node.id.replace(/[^a-zA-Z0-9_-]/g,'_')}/reference${sourceExt}`;
+        const path=secureArtifactPath(project.rootPath,rel);
+        await mkdir(dirname(path),{recursive:true});await writeFile(path,bytes);
+        const artifact:ArtifactRef={id:randomUUID(),type:'image',relativePath:rel,checksum:createHash('sha256').update(bytes).digest('hex'),metadata:{reference:true,sourceName:source.split(/[\\/]/).at(-1)}};
+        this.db.insertArtifact(project.id,nodeRunId,artifact);
+        this.db.updateNode(nodeRunId,{status:'SUCCEEDED',inputRefs,outputRefs:[artifact],error:null});
+        this.emitChange(runId);return;
+      }
       if ((mode==='comfyui' && ['media.image-generate','media.video-generate'].includes(node.type)) ||
           (mode==='ffmpeg' && node.type==='media.film-export') ||
           (mode==='piper' && node.type==='media.audio-generate')) {

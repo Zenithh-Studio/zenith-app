@@ -37,17 +37,20 @@ export async function runComfyMedia(ctx:MediaContext):Promise<ArtifactRef[]> {
   const template:unknown=JSON.parse(templateString);
   const client=new ComfyUIClient(String(ctx.node.config.endpoint??'http://127.0.0.1:8188'));
   const isVideo=ctx.node.type==='media.video-generate';
-  const tasks=isVideo?list(ctx.inputs.image):list(asRecord(ctx.inputs.task).tasks);
+  const promptInput=asRecord(ctx.inputs.prompt);
+  const references=list(ctx.inputs.reference);
+  const tasks=isVideo?list(ctx.inputs.image):list(asRecord(ctx.inputs.task).tasks).length?list(asRecord(ctx.inputs.task).tasks):references.length?references:[promptInput];
   if(tasks.length===0)throw new Error('No shot tasks or source images provided');
   const artifacts:ArtifactRef[]=[];
   for(let index=0;index<tasks.length;index++){
     if(ctx.signal.aborted)throw new Error('Generation aborted');
     const info=formatShot(tasks[index],index);
+    if(!info.prompt)info.prompt=String(promptInput.prompt??ctx.node.config.prompt??'');
     let imageName='';
-    if(isVideo){
-      const image=asRecord(tasks[index]);
-      if(typeof image.relativePath!=='string')throw new Error('Video generation requires generated image artifacts');
-      imageName=await client.uploadImage(new Uint8Array(await readFile(secureArtifactPath(ctx.projectRoot,image.relativePath))),'znith-shot-'+index+'.png',ctx.signal);
+    const sourceImage=asRecord(tasks[index]);
+    if((isVideo||references.length>0)&&typeof sourceImage.relativePath==='string'){
+      const extension=sourceImage.relativePath.split('.').at(-1)?.toLowerCase()??'png';
+      imageName=await client.uploadImage(new Uint8Array(await readFile(secureArtifactPath(ctx.projectRoot,sourceImage.relativePath))),'znith-shot-'+index+'.'+extension,ctx.signal);
     }
     const expanded=injectWorkflowTokens(template,{
       '$ZNITH_PROMPT':info.prompt,
