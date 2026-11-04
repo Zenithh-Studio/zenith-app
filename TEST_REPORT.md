@@ -10,7 +10,7 @@ Date: 2026-11-04
 - `pnpm build` — Vite renderer and Electron main/preload bundles build successfully.
 - `python3 scripts/check-sqlite-schema.py` — SQLite bootstrap creates the expected tables and enforces foreign keys.
 - `node scripts/check-offline.mjs` — parses TypeScript/TSX and JSON, verifies the 13-node registry and mock story/script/storyboard outputs.
-- The editor uses a full-screen dotted canvas, drag-safe node updates, typed connection validation, a searchable node picker, node settings, and a visible empty-canvas action. Workflow management uses in-app forms rather than browser prompt/confirm dialogs. Newly created workflows start empty. Node execution runs the selected node and its required upstream chain; text and media providers default to real local adapters, while mock output is opt-in.
+- The editor uses a full-screen dotted canvas, drag-safe node updates, typed connection validation, a searchable node picker, node settings, and a visible empty-canvas action. Workflow graph revisions persist only through the Save action; running requires the saved revision, and leaving with unsaved changes is blocked. Completed-run polling stops, and selected reference images render in the node and settings panel. Workflow management uses in-app forms rather than browser prompt/confirm dialogs. Newly created workflows start empty. Node execution runs the selected node and its required upstream chain; text and media providers default to real local adapters, while mock output is opt-in.
 
 ## GitHub Actions
 
