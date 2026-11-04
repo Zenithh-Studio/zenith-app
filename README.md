@@ -1,37 +1,62 @@
-# Znith AI Visual Workflow Studio
+# Znith AI Workflow Studio
 
-Znith Studio is a Next.js, Payload, and XYFlow application for building and executing typed visual workflows. Workflow definitions, execution snapshots, node records, logs, and outputs persist in the connected Payload backend.
+Znith Studio is a visual workspace for authoring, validating, and running AI workflows. It combines a ReactFlow editor with a Payload-backed content layer and server-side provider adapters.
+
+## Monorepo
+
+The repository is a pnpm workspace. The root Next.js application is the Figma Make deployment adapter; its App Router files stay at the root so Payload Admin, the generated Payload routes, and the Make lifecycle continue to use their supported layout.
+
+| Workspace               | Responsibility                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `fe/`                   | Frontend presentation, route components, and browser interactions                                  |
+| `be/`                   | Workflow and asset use cases, Payload repositories, provider execution, and collection definitions |
+| `packages/contracts/`   | Shared workflow types, Zod request contracts, node registry, provider catalog, and templates       |
+| `packages/utils/`       | Reusable, framework-independent helpers                                                            |
+| `src/app/`              | Thin Next.js route adapters and the generated Payload Admin/API routes                             |
+| `src/payload.config.ts` | Figma Payload composition root and automatic type-generation target                                |
+
+The frontend and backend packages use clean boundaries: App Router handlers translate HTTP requests, application services coordinate use cases, repository ports define persistence needs, and Payload adapters implement those ports. Shared contracts stay independent of React and Payload.
+
+## Requirements
+
+- Node.js `24.22.1`
+- pnpm `10.x`
+- A Figma Make runtime for Payload-backed local development and production builds
 
 ## Development
 
-The Figma Make development server is managed by the host and already runs on `$PORT`.
+Figma Make manages the development server on `$PORT`.
 
 ```bash
 pnpm install
 pnpm test
-pnpm exec tsc --noEmit
-NODE_ENV=production pnpm build
-figma make verify-deploy
+pnpm typecheck
+pnpm format:check
 ```
 
-Open `/` for workflow management, `/workflows/:id` for the editor, and `/admin` for Payload administration.
+To start the app outside the Make host, run `pnpm dev`. Payload/Figma platform configuration is injected by the Make lifecycle; do not add local database adapters or placeholder secrets.
+
+## Product capabilities
+
+- Create, search, duplicate, import, export, and delete workflows.
+- Compose graphs with typed inputs and outputs, undo/redo, copy/paste, and layout controls.
+- Validate acyclic dependencies and execute ready nodes concurrently with retry and timeout policies.
+- Persist execution snapshots, node outputs, status, logs, and errors in Payload.
+- Upload and reuse media from the Payload Media collection.
+- Configure server-side provider credentials through Make settings → Secrets.
 
 ## Provider configuration
 
-The OpenAI adapter reads `APP_OPENAI_API_KEY` only in server code. Configure it in **Make settings → Secrets**. When it is absent, AI nodes fail with a configuration-required error and never return fabricated output.
+Provider credentials are read only in backend code. For example, the OpenAI text adapter reads `APP_OPENAI_API_KEY`. Set provider secrets in the platform environment-variable flow; never commit them or place them in workflow definitions.
 
-Media generation nodes are shown as unavailable until a compatible server-side provider adapter is configured.
+Image and video generation requires a compatible provider and model configuration. Output nodes currently preserve the provider's output reference and filename metadata; persistent media ingestion is a separate storage capability.
 
-## Implemented production slice
+## Quality and releases
 
-- Persistent workflow management: create, search, open, duplicate, delete, import, and export
-- Infinite XYFlow canvas with pan, zoom, minimap, selection, node movement, typed connections, edge/node deletion, auto-layout, and fit controls
-- Undo/redo history, multi-node copy/paste shortcuts, and edge reconnection
-- Node palette and right-side inspector with configuration, resolved connection state, output preview, and execution logs
-- Versioned node registry independent of the visual components
-- DAG validation, cycle rejection, required-input checks, explicit port mapping, bounded parallel scheduling, retry/backoff, timeouts, failure propagation, node/dependency execution, and persistent snapshots
-- Real OpenAI text execution through a server-only adapter
-- Executable text, prompt, JSON, template, text/JSON merge, JSON transform, variable, guarded HTTP request, delay, debug, and preview nodes
-- Provider-ready creative, story, and video templates; unavailable media nodes are explicitly labeled
+`pnpm verify` runs formatting checks, TypeScript checks, and unit tests. GitHub Actions runs the same checks on pushes and pull requests. Production Payload builds and `figma make verify-deploy` remain Make-host checks because they need platform-provisioned backend configuration.
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/node-development.md`](docs/node-development.md).
+Use `pnpm changeset` for user-visible changes. Changeset entries select `patch`, `minor`, or `major` and use release notes beginning with labels such as `Added:`, `Changed:`, or `Fixed:`. The release workflow updates package versions and changelogs in a release pull request.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [docs/architecture.md](docs/architecture.md).
+
+For the product, data, device, and cleanup assessment, see [docs/project-assessment.md](docs/project-assessment.md).

@@ -1,33 +1,50 @@
 # Architecture
 
-## Boundaries
+## Workspace map
 
-- **UI (`src/components/studio`)** renders workflow management and the XYFlow editor. It never reads provider credentials.
-- **Contracts and registry (`src/core/workflow`)** define typed ports, workflow JSON, node metadata, and execution records independently of React.
-- **Execution engine (`src/core/workflow/engine.ts`)** validates the graph, builds dependency order, resolves values by source/target handle, invokes handlers, and returns normalized records and logs.
-- **Application API (`src/app/(frontend)/api/studio`)** validates public input, accesses Payload with access control enabled, snapshots workflows, invokes the engine, and persists outcomes.
-- **Payload (`workflows`, `executions`)** stores durable definitions, metadata, exact execution snapshots, node output records, and logs.
+- **Figma Make host (`src/`)** is the root Next.js deployment shell. It owns App Router entry points, Payload's generated Admin/API routes, `payload.config.ts`, and the integration composition root.
+- **Frontend (`fe/`)** contains route-level view components, browser interactions, shared layout, and styles. It does not access Payload credentials or persistence directly.
+- **Backend (`be/`)** contains workflow and asset application services, repository ports, Payload repository adapters, provider execution, and collection definitions.
+- **Contracts (`packages/contracts/`)** owns workflow DTOs, Zod request schemas, node types, provider catalog, registry, and starter templates. It has no dependency on React, Next.js, or Payload.
+- **Utilities (`packages/utils/`)** contains pure functions reused across workspace boundaries.
 
-## Execution lifecycle
+Next.js transpiles local packages through `transpilePackages`; the Make host remains at the repository root so Figma's `.figma/make` lifecycle and Payload route conventions remain intact.
 
-1. The route loads the persisted workflow.
-2. It writes a running execution containing an immutable definition snapshot.
-3. The engine validates node IDs, definitions, ports, data types, cardinality, required inputs, and acyclicity.
-4. Ready nodes run concurrently within a bounded worker limit. Each input is resolved from a specific upstream output handle.
-5. Node-level timeout and retry policies use bounded exponential backoff. Failed dependencies mark downstream work as skipped while independent branches continue.
-6. The route persists normalized node records, logs, duration, final status, and errors.
-7. The editor reloads the latest execution and renders output/status on each node.
+## Dependency direction
 
-Large media should be represented by Payload Media relationships and asset IDs, not embedded in workflow JSON. Media adapters remain unavailable in this deployment because no compatible provider credentials were supplied.
+```text
+App Router handlers → application services → domain repository ports
+                                         ↑
+Payload repositories and provider engine ─┘
 
-## Security posture
+Frontend components → shared contracts and utilities
+Backend services   → shared contracts and utilities
+```
 
-- Provider secrets are server-only environment variables.
-- Workflow exports contain definitions but never environment variables.
-- User input is allowlisted with Zod at application routes.
-- Payload collection access is explicit. This Make workspace is intentionally a shared single-tenant studio; add app-user authentication and owner relationships before exposing private multi-user workspaces.
-- OpenAI errors are normalized without logging request authorization headers.
+The root route files are transport adapters. They validate request bodies, call the composed application service, and shape HTTP responses. The `src/lib/backend-services.ts` composition root injects the Make-provided Payload client into backend repositories.
 
-## Extension points
+## Workflow execution
 
-Additional provider adapters should normalize modality-specific requests and outputs behind node executors. Async providers should persist provider job IDs in execution records and use Payload Jobs for polling/recovery.
+1. The API loads a workflow through `PayloadWorkflowRepository` with access checks enabled.
+2. `WorkflowService` creates an execution record with an immutable workflow-definition snapshot.
+3. The workflow engine checks node identifiers, edge ports, data types, required inputs, and cycles.
+4. Ready nodes run with bounded concurrency, retry, and timeout settings.
+5. The service persists node records, logs, duration, status, and errors, then updates the workflow's list-facing run status.
+6. The editor reloads the latest execution and displays node outputs and execution history.
+
+The snapshot is retained for reproducibility. Large binary media belongs in Payload's Media collection; workflow definitions should reference asset IDs and URLs only as needed by current execution behavior.
+
+## Backend layers
+
+- **Domain:** repository interfaces and domain-facing data contracts.
+- **Application:** workflow and asset services that coordinate validation, template defaults, execution lifecycle, and file rules.
+- **Infrastructure:** Payload Local API adapters, provider calls, and the graph execution engine.
+- **Presentation:** Next.js route handlers in `src/app/(frontend)/api/studio`, kept thin and independent of persistence details.
+
+## Security and operational boundaries
+
+- Provider keys are server-only environment variables and are never stored in workflow exports.
+- Payload/Figma database, auth, and file storage are platform-managed; this repository does not configure an adapter or local database.
+- Workflow definitions are versioned JSON contracts. Port IDs and node types are durable data and require migration planning when changed.
+- The current application is a shared single-tenant workspace. Add app-user authentication, ownership relationships, and narrower collection access before serving private multi-user workspaces.
+- Long-running provider jobs currently execute in the request lifecycle. Durable queueing and recovery should use Payload Jobs when asynchronous execution is introduced.
