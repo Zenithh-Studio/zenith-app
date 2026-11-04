@@ -106,5 +106,5 @@ export interface ZnithAPI {
     approveNode(id: string, approved: boolean): Promise<void>;
     subscribe(id: string, callback: (event: RunEvent) => void): () => void;
   };
-  artifacts: { readText(id: string): Promise<string> };
+  artifacts: { readText(id: string): Promise<string>; reveal(id:string): Promise<void> };
 }
