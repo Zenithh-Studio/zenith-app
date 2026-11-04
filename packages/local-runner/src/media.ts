@@ -18,7 +18,7 @@ const asRecord=(x:unknown):Record<string,unknown>=>x&&typeof x==='object'&&!Arra
 const list=(x:unknown):unknown[]=>Array.isArray(x)?x:x===undefined?[]:[x];
 function formatShot(shot:unknown,index:number):{name:string;prompt:string;index:number}{
   const data=asRecord(shot);
-  return {name:String(data.id??'shot-'+index).replace(/[^a-zA-Z0-9_-]/g,'_'),prompt:String(data.imagePrompt??data.videoPrompt??data.description??''),index:Number(data.index??index)};
+  return {name:String(data.id??'shot-'+index).replace(/[^a-zA-Z0-9_-]/g,'_'),prompt:String(data.imagePrompt??data.videoPrompt??data.description??asRecord(data.metadata).prompt??''),index:Number(data.index??asRecord(data.metadata).shotIndex??index)};
 }
 async function saveMedia(root:string,runId:string,nodeId:string,name:string,bytes:Uint8Array,type:'image'|'video',index:number):Promise<ArtifactRef>{
   const ext=type==='image'?'png':'mp4';
@@ -56,7 +56,7 @@ export async function runComfyMedia(ctx:MediaContext):Promise<ArtifactRef[]> {
     if(!expanded||typeof expanded!=='object'||Array.isArray(expanded))throw new Error('ComfyUI API graph must be a JSON object');
     const promptId=await client.submit(expanded as Record<string,unknown>,ctx.signal);
     const files=await client.waitForOutputs(promptId,ctx.signal);
-    const file=files.find(x=>isVideo?/\.(mp4|webm|mov)$/i.test(x.filename):/\.(png|jpg|jpeg|webp)$/i.test(x.filename));
+    const file=files.find(x=>isVideo?/\.mp4$/i.test(x.filename):/\.png$/i.test(x.filename));
     if(!file)throw new Error('ComfyUI completed but produced no compatible '+(isVideo?'video':'image')+' file');
     const bytes=await client.download(file,ctx.signal);
     const output=await saveMedia(ctx.projectRoot,ctx.runId,ctx.node.id,info.name,bytes,isVideo?'video':'image',info.index);
