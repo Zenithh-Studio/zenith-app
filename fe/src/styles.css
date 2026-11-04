@@ -1,6 +1,9 @@
 @import 'tailwindcss';
 @import '@xyflow/react/dist/style.css';
 
+@source './';
+@source '../../src/';
+
 @theme {
   --font-sans: 'Inter', 'SF Pro Display', 'Segoe UI', sans-serif;
   --color-violet-650: #6d3fe4;

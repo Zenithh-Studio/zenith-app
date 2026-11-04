@@ -1,4 +1,4 @@
-import { WorkflowEditor } from '@/components/studio/WorkflowEditor'
+import { WorkflowEditor } from '@znith/fe'
 
 export default async function WorkflowPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

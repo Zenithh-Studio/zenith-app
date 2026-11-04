@@ -1,5 +1,3 @@
-import { AssetLibrary } from '@/components/studio/AssetLibrary'
+import { AssetsPage } from '@znith/fe'
 
-export default function AssetsPage() {
-  return <AssetLibrary />
-}
+export default AssetsPage

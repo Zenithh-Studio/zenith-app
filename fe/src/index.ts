@@ -1,0 +1,6 @@
+export { AssetLibrary } from './presentation/components/studio/AssetLibrary'
+export { WorkflowDashboard } from './presentation/components/studio/WorkflowDashboard'
+export { WorkflowEditor } from './presentation/components/studio/WorkflowEditor'
+export { DocumentationPage } from './routes/DocumentationPage'
+export { FrontendLayout, frontendMetadata } from './routes/FrontendLayout'
+export { AssetsPage, HomePage, WorkflowNotFoundPage } from './routes/pages'

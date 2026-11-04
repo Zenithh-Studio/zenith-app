@@ -1,5 +1,3 @@
-import { WorkflowDashboard } from '@/components/studio/WorkflowDashboard'
+import { HomePage } from '@znith/fe'
 
-export default function HomePage() {
-  return <WorkflowDashboard />
-}
+export default HomePage
