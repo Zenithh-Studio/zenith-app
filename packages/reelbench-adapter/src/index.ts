@@ -39,3 +39,9 @@ export async function scrubExportMetadata(input:string,output:string,options:Ree
   await access(output);
   return resolve(output);
 }
+
+/** Builds the upstream Reelbench sync plan for a finished film and shots.json. */
+export async function createVideoSyncPlan(shotsJson:string,video:string,options:ReelbenchOptions):Promise<string> {
+  const script=resolve(options.skillsRoot,'video-sync','scripts','video-sync.mjs');
+  return runTool(script,['plan',resolve(shotsJson),'--video',resolve(video)],options.signal);
+}
