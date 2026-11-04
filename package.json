@@ -11,7 +11,8 @@
     "check:offline": "node scripts/check-offline.mjs",
     "package:dir": "pnpm --filter @znith/desktop package:dir",
     "package:win": "pnpm --filter @znith/desktop package:win",
-    "package:linux": "pnpm --filter @znith/desktop package:linux"
+    "package:linux": "pnpm --filter @znith/desktop package:linux",
+    "skills:install": "node scripts/install-upstream-skills.mjs"
   },
   "engines": {
     "node": ">=22"
