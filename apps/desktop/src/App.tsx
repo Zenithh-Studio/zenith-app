@@ -142,6 +142,7 @@ export default function App() {
   const showArtifact=async(artifactId:string)=>{
     try{setArtifactText(await window.znith.artifacts.readText(artifactId));}catch(e){setError(String(e));}
   };
+  useEffect(()=>{setArtifactText('');},[selectedId]);
   const selectedRun=run?.nodes.find(n=>n.nodeId===selectedId);
   return <div className="shell">
     <header className="topbar">
@@ -176,6 +177,7 @@ export default function App() {
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onConnect={onConnect} onNodeClick={(_event,node)=>setSelectedId(node.id)}
             onPaneClick={()=>setSelectedId(null)} fitView fitViewOptions={{padding:0.25}}
+            onInit={instance=>{requestAnimationFrame(()=>instance.fitView({padding:0.25,duration:250}));}}
             deleteKeyCode={['Backspace','Delete']} colorMode="dark" proOptions={{hideAttribution:true}}>
             <Background color="#2b3044" gap={24} size={1} />
             <Controls showInteractive={false}/>
