@@ -99,3 +99,7 @@ This creates a **private** repository and pushes the existing history, subject t
 ### Security note
 
 The Phase 1+2 renderer CSP permits inline scripts to support the Vite React development preamble. Before distribution, tighten the packaged CSP (remove `unsafe-inline`), implement strict navigation/resource policy, and perform a security review. Electron keeps context isolation enabled, sandbox enabled and Node integration disabled.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs `pnpm typecheck`, `pnpm test`, and `pnpm build` on GitHub Actions after the repository is published. Because the sandbox cannot reach npm registry, the workflow has **not** been executed yet. It temporarily uses `pnpm install --no-frozen-lockfile` until a lockfile is generated and committed; then switch to `--frozen-lockfile`.
