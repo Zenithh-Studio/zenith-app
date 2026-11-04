@@ -64,8 +64,21 @@ export interface ProjectSummary {
 }
 export interface ProjectData {
   project: ProjectSummary;
+  workflowName: string;
   graph: WorkflowGraph;
   revision: number;
+}
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  projectId: string;
+  projectName: string;
+  revision: number;
+  updatedAt: number;
+  nodeCount: number;
+  lastRunId: string | null;
+  lastRunStatus: RunStatus | null;
+  lastRunAt: number | null;
 }
 export interface ValidationResult { valid: boolean; errors: string[] }
 export interface NodeRunSnapshot {
@@ -95,6 +108,12 @@ export interface ZnithAPI {
     open(id: string): Promise<ProjectData>;
   };
   workflows: {
+    list(): Promise<WorkflowSummary[]>;
+    open(id: string): Promise<ProjectData>;
+    create(projectId: string, name: string): Promise<ProjectData>;
+    rename(id: string, name: string): Promise<void>;
+    duplicate(id: string, name: string): Promise<ProjectData>;
+    delete(id: string): Promise<void>;
     save(id: string, graph: WorkflowGraph, expectedRevision: number): Promise<number>;
     validate(graph: WorkflowGraph): Promise<ValidationResult>;
   };

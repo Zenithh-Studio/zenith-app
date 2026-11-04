@@ -39,6 +39,12 @@ function registerIPC():void {
   ipcMain.handle('projects:list',()=>database.listProjects());
   ipcMain.handle('projects:create',(_e,name:unknown)=>database.createProject(projectNameSchema.parse(name)));
   ipcMain.handle('projects:open',(_e,id:unknown)=>database.openProject(idSchema.parse(id)));
+  ipcMain.handle('workflows:list',()=>database.listWorkflows());
+  ipcMain.handle('workflows:open',(_e,id:unknown)=>database.openWorkflow(idSchema.parse(id)));
+  ipcMain.handle('workflows:create',(_e,projectId:unknown,name:unknown)=>database.createWorkflow(idSchema.parse(projectId),projectNameSchema.parse(name)));
+  ipcMain.handle('workflows:rename',(_e,id:unknown,name:unknown)=>database.renameWorkflow(idSchema.parse(id),projectNameSchema.parse(name)));
+  ipcMain.handle('workflows:duplicate',(_e,id:unknown,name:unknown)=>database.duplicateWorkflow(idSchema.parse(id),projectNameSchema.parse(name)));
+  ipcMain.handle('workflows:delete',(_e,id:unknown)=>database.deleteWorkflow(idSchema.parse(id)));
   ipcMain.handle('workflows:validate',(_e,graph:unknown)=>validateGraph(graph));
   ipcMain.handle('workflows:save',(_e,id:unknown,graph:unknown,revision:unknown)=>
     database.saveWorkflow(idSchema.parse(id),graphSchema.parse(graph),revisionSchema.parse(revision)));

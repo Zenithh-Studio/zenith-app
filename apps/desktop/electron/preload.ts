@@ -7,6 +7,12 @@ const bridge:ZnithAPI={
     open:(id:string)=>ipcRenderer.invoke('projects:open',id),
   },
   workflows:{
+    list:()=>ipcRenderer.invoke('workflows:list'),
+    open:(id:string)=>ipcRenderer.invoke('workflows:open',id),
+    create:(projectId:string,name:string)=>ipcRenderer.invoke('workflows:create',projectId,name),
+    rename:(id:string,name:string)=>ipcRenderer.invoke('workflows:rename',id,name),
+    duplicate:(id:string,name:string)=>ipcRenderer.invoke('workflows:duplicate',id,name),
+    delete:(id:string)=>ipcRenderer.invoke('workflows:delete',id),
     save:(id:string,graph:WorkflowGraph,expectedRevision:number)=>ipcRenderer.invoke('workflows:save',id,graph,expectedRevision),
     validate:(graph:WorkflowGraph)=>ipcRenderer.invoke('workflows:validate',graph),
   },
