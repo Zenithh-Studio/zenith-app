@@ -12,6 +12,7 @@ const bridge:ZnithAPI={
   },
   runs:{
     start:(workflowId:string)=>ipcRenderer.invoke('runs:start',workflowId),
+    latest:(workflowId:string)=>ipcRenderer.invoke('runs:latest',workflowId),
     get:(id:string)=>ipcRenderer.invoke('runs:get',id),
     cancel:(id:string)=>ipcRenderer.invoke('runs:cancel',id),
     retryNode:(id:string)=>ipcRenderer.invoke('runs:retry',id),
