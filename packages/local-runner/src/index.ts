@@ -82,6 +82,25 @@ export class LocalScheduler extends EventEmitter {
     this.emitChange(row.runId);
     void this.tick();
   }
+  approveNode(nodeRunId:string, approved:boolean):void {
+    const row=this.db.sqlite.prepare('SELECT id, workflow_run_id AS runId, node_id AS nodeId, status FROM node_runs WHERE id=?')
+      .get(nodeRunId) as {id:string;runId:string;nodeId:string;status:string}|undefined;
+    if(!row || row.status!=='WAITING_APPROVAL') throw new Error('Node is not waiting for approval');
+    const graph=this.db.getRunGraph(row.runId);
+    const node=graph.nodes.find(n=>n.id===row.nodeId);
+    if(node?.type!=='logic.approval') throw new Error('Only Approval Gate nodes can be approved');
+    if(!approved) {
+      this.db.updateNode(row.id,{status:'FAILED',error:'Storyboard rejected by user'});
+    } else {
+      const upstream=graph.edges.filter(e=>e.target===row.nodeId)
+        .flatMap(e=>this.db.getRun(row.runId).nodes.find(n=>n.nodeId===e.source)?.outputRefs??[]);
+      if(upstream.length===0) throw new Error('Approval Gate has no storyboard artifact');
+      this.db.updateNode(row.id,{status:'SUCCEEDED',outputRefs:upstream,error:null});
+    }
+    this.db.setRunStatus(row.runId,'RUNNING');
+    this.emitChange(row.runId,'run-updated');
+    void this.tick();
+  }
   private async tick(): Promise<void> {
     if(this.ticking || this.stopped) return;
     this.ticking=true;
@@ -169,7 +188,7 @@ export class LocalScheduler extends EventEmitter {
         return;
       }
       const artifact:ArtifactRef={id:randomUUID(),type:outputPort.type,relativePath:rel,
-        checksum:createHash('sha256').update(output).digest('hex'),metadata:{mock:true,nodeType:node.type}};
+        checksum:createHash('sha256').update(output).digest('hex'),metadata:{mock:node.config.executionMode===undefined || node.config.executionMode==='mock',nodeType:node.type}};
       this.db.insertArtifact(project.id,nodeRunId,artifact);
       this.db.updateNode(nodeRunId,{status:'SUCCEEDED',inputRefs,outputRefs:[artifact],error:null});
       this.emitChange(runId);
