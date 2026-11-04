@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "concurrently -k -n web,main,app \"pnpm dev:renderer\" \"pnpm dev:main\" \"pnpm dev:launch\"",
     "dev:renderer": "vite --host 127.0.0.1",
-    "dev:main": "tsup electron/main.ts electron/preload.ts --format cjs --platform node --target node22 --out-dir dist-electron --watch --external electron --external better-sqlite3 --external drizzle-orm --external drizzle-orm/*",
+    "dev:main": "tsup --watch",
     "dev:launch": "wait-on http://127.0.0.1:5173 dist-electron/main.cjs && cross-env ZNITH_DEV_SERVER=http://127.0.0.1:5173 electron .",
-    "build": "vite build && tsup electron/main.ts electron/preload.ts --format cjs --platform node --target node22 --out-dir dist-electron --external electron --external better-sqlite3 --external drizzle-orm --external drizzle-orm/*",
+    "build": "vite build && tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "package:dir": "pnpm build && electron-builder --dir",

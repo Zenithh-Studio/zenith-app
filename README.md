@@ -95,3 +95,7 @@ This creates a **private** repository and pushes the existing history, subject t
 3. Approval decision UI and resumable paused runs.
 4. ComfyUI image/video providers, actual per-shot fan-out and FFmpeg MP4 export.
 5. `reelbench-skills` for analysis and export metadata tools after basic video export works.
+
+### Security note
+
+The Phase 1+2 renderer CSP permits inline scripts to support the Vite React development preamble. Before distribution, tighten the packaged CSP (remove `unsafe-inline`), implement strict navigation/resource policy, and perform a security review. Electron keeps context isolation enabled, sandbox enabled and Node integration disabled.
