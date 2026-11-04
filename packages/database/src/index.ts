@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -94,8 +94,10 @@ export class ZnithDatabase {
     return this.db.select().from(workflowRuns).all().filter(r=>['PENDING','READY','RUNNING'].includes(r.status)).map(r=>r.id);
   }
   transitionNode(nodeRunId:string,from:string,to:string):boolean {
-    return this.db.update(nodeRuns).set({status:to,updatedAt:Date.now(),...(to==='RUNNING'?{attempt:this.sqlite.prepare('SELECT attempt FROM node_runs WHERE id=?').get(nodeRunId)?.attempt+1}: {})})
-      .where(and(eq(nodeRuns.id,nodeRunId),eq(nodeRuns.status,from))).run().changes===1;
+    const sql = to === 'RUNNING'
+      ? 'UPDATE node_runs SET status=?, updated_at=?, attempt=attempt+1 WHERE id=? AND status=?'
+      : 'UPDATE node_runs SET status=?, updated_at=? WHERE id=? AND status=?';
+    return this.sqlite.prepare(sql).run(to, Date.now(), nodeRunId, from).changes === 1;
   }
   updateNode(id:string, fields:{status?:string;error?:string|null;outputRefs?:ArtifactRef[];inputRefs?:ArtifactRef[]}):void {
     this.db.update(nodeRuns).set({...fields,updatedAt:Date.now()}).where(eq(nodeRuns.id,id)).run();
