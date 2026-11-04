@@ -120,7 +120,7 @@ export interface ZnithAPI {
     validate(graph: WorkflowGraph): Promise<ValidationResult>;
   };
   runs: {
-    start(id: string): Promise<string>;
+    start(id: string, nodeId?:string): Promise<string>;
     latest(workflowId: string): Promise<string | null>;
     get(id: string): Promise<RunSnapshot>;
     cancel(id: string): Promise<void>;

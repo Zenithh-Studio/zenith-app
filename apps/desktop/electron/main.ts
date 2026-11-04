@@ -52,7 +52,7 @@ function registerIPC():void {
   ipcMain.handle('workflows:validate',(_e,graph:unknown)=>validateGraph(graph));
   ipcMain.handle('workflows:save',(_e,id:unknown,graph:unknown,revision:unknown)=>
     database.saveWorkflow(idSchema.parse(id),graphSchema.parse(graph),revisionSchema.parse(revision)));
-  ipcMain.handle('runs:start',(_e,id:unknown)=>scheduler.startRun(idSchema.parse(id)));
+  ipcMain.handle('runs:start',(_e,id:unknown,nodeId:unknown)=>scheduler.startRun(idSchema.parse(id),nodeId===undefined?undefined:z.string().min(1).max(100).parse(nodeId)));
   ipcMain.handle('runs:latest',(_e,id:unknown)=>database.latestRunId(idSchema.parse(id)));
   ipcMain.handle('runs:get',(_e,id:unknown)=>database.getRun(idSchema.parse(id)));
   ipcMain.handle('runs:cancel',(_e,id:unknown)=>scheduler.cancelRun(idSchema.parse(id)));

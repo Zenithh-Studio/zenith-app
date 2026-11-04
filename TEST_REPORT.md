@@ -6,11 +6,11 @@ Date: 2026-11-04
 
 - `pnpm install --frozen-lockfile` — dependency install and native builds succeeded.
 - `pnpm typecheck` — renderer, Electron main/preload, and shared packages typecheck successfully.
-- `pnpm test` — 15 tests pass, including workflow CRUD, graph validation, and the seven-node visual video starter.
+- `pnpm test` — 18 tests pass, including workflow CRUD, graph validation, empty workflow creation, real-provider configuration checks, and selected-node upstream execution.
 - `pnpm build` — Vite renderer and Electron main/preload bundles build successfully.
 - `python3 scripts/check-sqlite-schema.py` — SQLite bootstrap creates the expected tables and enforces foreign keys.
 - `node scripts/check-offline.mjs` — parses TypeScript/TSX and JSON, verifies the 13-node registry and mock story/script/storyboard outputs.
-- The editor now uses a full-screen dotted canvas, draggable image/video and prompt nodes, typed connections, node actions, a searchable node picker, settings drawer, and a seven-node reference-to-video starter. Local image references are copied into project artifacts; generated media previews use the artifact preview IPC.
+- The editor uses a full-screen dotted canvas, typed connections, a searchable node picker, node settings, and a visible empty-canvas action. Newly created workflows start empty. Node execution runs the selected node and its required upstream chain; text and media providers default to real local adapters, while mock output is opt-in.
 
 ## GitHub Actions
 

@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { extname, join, resolve, sep, dirname } from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { ArtifactRef, ArtifactType, GraphNode, RunEvent, RunStatus, WorkflowGraph } from '@znith/contracts';
-import { validateGraph } from '@znith/workflow-engine';
+import { graphThroughNode, validateGraph } from '@znith/workflow-engine';
 import type { ZnithDatabase } from '@znith/database';
 import { NODE_REGISTRY } from '@znith/node-registry';
 import { OllamaClient, OpenAICompatibleClient } from '@znith/providers';
@@ -33,7 +33,8 @@ export class LocalScheduler extends EventEmitter {
       for(const row of this.db.getRunRows(id)) {
         if(row.status==='RUNNING') {
           const node=this.db.getRunGraph(id).nodes.find(n=>n.id===row.nodeId);
-          if(!node || (node.config.executionMode && node.config.executionMode!=='mock')) {
+          const canReplay=node&&(node.config.executionMode==='mock'||['film.story-input','logic.batch-shots','logic.collect-clips'].includes(node.type));
+          if(!canReplay) {
             this.db.updateNode(row.id,{status:'FAILED',error:'Interrupted real provider job. Inspect provider state before retrying to avoid duplicate charges or renders.'});
           } else this.db.transitionNode(row.id,'RUNNING','READY');
         }
@@ -57,10 +58,11 @@ export class LocalScheduler extends EventEmitter {
   private emitChange(runId:string,kind:RunEvent['kind']='node-updated') {
     this.emit('change',{runId,kind,timestamp:Date.now()} satisfies RunEvent);
   }
-  startRun(workflowId:string):string {
+  startRun(workflowId:string,targetNodeId?:string):string {
     const wf=this.db.findWorkflow(workflowId);
     if(!wf) throw new Error('Workflow not found');
-    const graph=wf.graph as WorkflowGraph;
+    const fullGraph=wf.graph as WorkflowGraph;
+    const graph=targetNodeId?graphThroughNode(fullGraph,targetNodeId):fullGraph;
     const valid=validateGraph(graph);
     if(!valid.valid) throw new Error(valid.errors.join('; '));
     if(graph.nodes.length===0) throw new Error('Cannot run an empty graph');
@@ -190,7 +192,8 @@ export class LocalScheduler extends EventEmitter {
           inputByPort[edge.targetHandle]=[...(Array.isArray(previous)?previous:previous===undefined?[]:[previous]),...payloads];
         } else inputByPort[edge.targetHandle]=payloads[0];
       }
-      const mode=String(node.config.executionMode??'mock');
+      const defaultMode=['media.image-generate','media.video-generate'].includes(node.type)?'comfyui':node.type==='media.audio-generate'?'piper':node.type==='media.film-export'?'ffmpeg':skillForNode(node.type)?'ollama':'local';
+      const mode=String(node.config.executionMode??defaultMode);
       if(node.type==='media.image-reference'){
         const source=String(node.config.sourcePath??'').trim();
         if(!source)throw new Error('Choose a local image file in the node settings');
@@ -278,15 +281,19 @@ export function mockNode(node:GraphNode,inputs:Record<string,unknown>):unknown {
   }
 }
 
-/** AI text execution is opt-in; the default stays offline and deterministic. */
+/** AI skill nodes use a real provider unless the user explicitly selects mock mode. */
 export async function executeFilmNode(node: GraphNode, inputs: Record<string,unknown>, signal: AbortSignal): Promise<unknown> {
-  const mode=String(node.config.executionMode??'mock');
-  if(mode==='mock') {
-    if(node.type==='logic.collect-clips' && Array.isArray(inputs.video) && inputs.video.some(x=>x && typeof x==='object' && 'relativePath' in x)) return collectClipManifest(inputs);
-    return mockNode(node,inputs);
+  if(node.type==='film.story-input')return {title:String(node.config.title??'Untitled'),prompt:String(node.config.prompt??'')};
+  if(node.type==='logic.batch-shots'){
+    const shots=(inputs.shots as Record<string,unknown>|undefined)?.shots;
+    if(!Array.isArray(shots)||shots.length===0)throw new Error('Batch Shots requires a storyboard with at least one shot');
+    return {tasks:shots.map((shot,index)=>({...shot,index:Number((shot as Record<string,unknown>).index??index)}))};
   }
+  if(node.type==='logic.collect-clips')return collectClipManifest(inputs);
+  const mode=String(node.config.executionMode??'ollama');
+  if(mode==='mock')return mockNode(node,inputs);
   const skill=skillForNode(node.type);
-  if(!skill) throw new Error(`Node ${node.type} does not yet have a real ${mode} executor; choose mock or configure a supported provider`);
+  if(!skill) throw new Error(`Node ${node.type} has no executor for ${mode}`);
   const model=String(node.config.model??'');
   if(!model) throw new Error('Set the model name in the node Inspector before running AI');
   const output=mode==='ollama'

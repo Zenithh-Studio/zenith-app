@@ -4,6 +4,16 @@ import { NODE_REGISTRY } from '@znith/node-registry';
 export function dependencies(graph: WorkflowGraph, nodeId: string): string[] {
   return [...new Set(graph.edges.filter(edge => edge.target === nodeId).map(edge => edge.source))];
 }
+export function graphThroughNode(graph:WorkflowGraph,nodeId:string):WorkflowGraph {
+  if(!graph.nodes.some(node=>node.id===nodeId))throw new Error(`Node ${nodeId} was not found`);
+  const included=new Set([nodeId]);
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(const edge of graph.edges)if(included.has(edge.target)&&!included.has(edge.source)){included.add(edge.source);changed=true;}
+  }
+  return {...graph,nodes:graph.nodes.filter(node=>included.has(node.id)),edges:graph.edges.filter(edge=>included.has(edge.source)&&included.has(edge.target))};
+}
 export function validateGraph(input: unknown): ValidationResult {
   const parsed = graphSchema.safeParse(input);
   if (!parsed.success) return { valid: false, errors: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`) };

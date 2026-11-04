@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ReactFlow, Background, BackgroundVariant, MiniMap, Panel,
-  applyNodeChanges, applyEdgeChanges, useReactFlow,
+  ReactFlow, Background, BackgroundVariant, MiniMap, Panel, ReactFlowProvider,
+  applyNodeChanges, applyEdgeChanges, useReactFlow, useNodesInitialized,
   type Node, type Edge, type Connection, type NodeChange, type EdgeChange
 } from '@xyflow/react';
 import { NODE_DEFINITIONS } from '@znith/node-registry';
@@ -12,13 +12,17 @@ import WorkflowManagement from './WorkflowManagement';
 
 const nodeTypes={znith:FlowNode};
 const emptyGraph:WorkflowGraph={schemaVersion:2,nodes:[],edges:[]};
+const defaultExecutionMode=(type:string)=>['media.image-generate','media.video-generate'].includes(type)?'comfyui':type==='media.audio-generate'?'piper':type==='media.film-export'?'ffmpeg':['film.outline','film.script','film.characters','film.storyboard'].includes(type)?'ollama':'local';
+const initialNodeOffsets=[{x:0,y:0},{x:340,y:0},{x:-340,y:0},{x:0,y:230},{x:340,y:230},{x:-340,y:230},{x:0,y:-230},{x:340,y:-230},{x:-340,y:-230}];
 
 function CanvasFooter(){
   const {fitView,zoomIn,zoomOut}=useReactFlow();
   return <Panel position="bottom-left" className="viewport-tools"><button onClick={()=>void zoomIn()}>＋</button><button onClick={()=>void zoomOut()}>−</button><button className="zoom-value" onClick={()=>void fitView({padding:.18,duration:240})}>FIT</button><button title="Fit canvas" onClick={()=>void fitView({padding:.18,duration:240})}>⤢</button></Panel>;
 }
 
-export default function App() {
+function AppContent() {
+  const {fitView,screenToFlowPosition}=useReactFlow();
+  const nodesInitialized=useNodesInitialized();
   const [view,setView]=useState<'management'|'editor'>(()=>window.location.pathname.endsWith('/editor')?'editor':'management');
   const [project,setProject]=useState<ProjectData|null>(null);
   const [graph,setGraph]=useState<WorkflowGraph>(emptyGraph);
@@ -56,6 +60,11 @@ export default function App() {
     return()=>window.removeEventListener('popstate',syncRoute);
   },[openWorkflow]);
   useEffect(()=>{
+    if(view!=='editor'||!project?.project.workflowId||graph.nodes.length===0||!nodesInitialized)return;
+    const frame=requestAnimationFrame(()=>void fitView({padding:.18,duration:0}));
+    return()=>cancelAnimationFrame(frame);
+  },[fitView,graph.nodes.length,nodesInitialized,project?.project.workflowId,view]);
+  useEffect(()=>{
     if(!runId)return;
     let alive=true;
     const refresh=()=>void window.znith.runs.get(runId).then(snapshot=>{
@@ -78,16 +87,17 @@ export default function App() {
     return()=>{alive=false;};
   },[run]);
 
-  const flowNodes=useMemo<Node[]>(()=>graph.nodes.map(n=>({
-    id:n.id,type:'znith',position:n.position,selected:n.id===selectedId,
-    data:{label:NODE_DEFINITIONS.find(def=>def.type===n.type)?.label??n.type,nodeType:n.type,
-      status:run?.nodes.find(x=>x.nodeId===n.id)?.status,prompt:String(n.config.prompt??''),
-      provider:n.config.executionMode==='comfyui'?'Flow · ComfyUI':n.config.executionMode==='ollama'?'Ollama':n.config.executionMode==='cloud'?'Cloud LLM':'Local · Mock',
-      mediaPreview:(run?.nodes.find(x=>x.nodeId===n.id)?.outputRefs??[]).map(ref=>previews[ref.id]).find(Boolean),
-      onPromptChange:(value:string)=>updateNodeConfig(n.id,'prompt',value),onRun:()=>void start(),
-      onDuplicate:()=>duplicateNode(n.id),onBranch:()=>openBranchPicker(n.id),
-      onSettings:()=>{setSelectedId(n.id);setInspectorOpen(true);},onDelete:()=>deleteNode(n.id)},
-  })),[graph.nodes,selectedId,run,previews]);
+  const flowNodes=useMemo<Node[]>(()=>graph.nodes.map(n=>{
+    const mode=String(n.config.executionMode??defaultExecutionMode(n.type));
+    const provider=mode==='comfyui'?'ComfyUI':mode==='ollama'?'Ollama':mode==='cloud'?'Cloud LLM':mode==='mock'?'Mock · Sample':mode==='piper'?'Piper':mode==='ffmpeg'?'FFmpeg':'Local';
+    return {id:n.id,type:'znith',position:n.position,selected:n.id===selectedId,
+      data:{label:NODE_DEFINITIONS.find(def=>def.type===n.type)?.label??n.type,nodeType:n.type,
+        status:run?.nodes.find(x=>x.nodeId===n.id)?.status,prompt:String(n.config.prompt??''),provider,
+        mediaPreview:(run?.nodes.find(x=>x.nodeId===n.id)?.outputRefs??[]).map(ref=>previews[ref.id]).find(Boolean),
+        onPromptChange:(value:string)=>updateNodeConfig(n.id,'prompt',value),onRun:()=>void start(n.id),
+        onDuplicate:()=>duplicateNode(n.id),onBranch:()=>openBranchPicker(n.id),
+        onSettings:()=>{setSelectedId(n.id);setInspectorOpen(true);},onDelete:()=>deleteNode(n.id)}};
+  }),[graph.nodes,selectedId,run,previews]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     id:e.id,source:e.source,target:e.target,sourceHandle:e.sourceHandle,targetHandle:e.targetHandle,
     type:'smoothstep',animated:run?.nodes.some(n=>n.nodeId===e.target&&n.status==='RUNNING')??false,
@@ -97,19 +107,22 @@ export default function App() {
     setGraph(updater);setDirty(true);setNotice('');
   };
   const onNodesChange=useCallback((changes:NodeChange[])=>{
-    if(changes.every(c=>c.type==='select'))return;
+    const structural=changes.filter(c=>['position','remove','add','replace'].includes(c.type));
+    if(structural.length===0)return;
     changeGraph(prev=>{
       const current:Node[]=prev.nodes.map(n=>({id:n.id,type:'znith',position:n.position,data:{}}));
-      const changed=applyNodeChanges(changes,current);
+      const changed=applyNodeChanges(structural,current);
       const positions=new Map(changed.map(n=>[n.id,n.position]));
       return {...prev,nodes:prev.nodes.filter(n=>positions.has(n.id)).map(n=>({...n,position:positions.get(n.id)!})),
         edges:prev.edges.filter(e=>positions.has(e.source)&&positions.has(e.target))};
     });
   },[]);
   const onEdgesChange=useCallback((changes:EdgeChange[])=>{
+    const structural=changes.filter(c=>['remove','add','replace'].includes(c.type));
+    if(structural.length===0)return;
     changeGraph(prev=>{
       const base:Edge[]=prev.edges.map(e=>({...e,type:'smoothstep'}));
-      const edges=applyEdgeChanges(changes,base);
+      const edges=applyEdgeChanges(structural,base);
       return {...prev,edges:edges.map(e=>({id:e.id,source:e.source,target:e.target,sourceHandle:e.sourceHandle??'',targetHandle:e.targetHandle??''}))};
     });
   },[]);
@@ -124,14 +137,17 @@ export default function App() {
     const def=NODE_DEFINITIONS.find(n=>n.type===type)!;
     const id=`${type.split('.').at(-1)}-${crypto.randomUUID().slice(0,5)}`;
     const source=graph.nodes.find(n=>n.id===fromNodeId);
-    const node:GraphNode={id,type,position:source?{x:source.position.x+410,y:source.position.y+80}:{x:100+graph.nodes.length*72,y:100+graph.nodes.length*42},
-      runtime:'local',config:type==='film.story-input'?{prompt:'Mô tả khung hình hoặc chuyển động cần tạo...'}:
-        ['media.image-generate','media.video-generate'].includes(type)?{executionMode:'mock'}:{}};
+    const canvasCenter=screenToFlowPosition({x:window.innerWidth*.52,y:window.innerHeight*.5});
+    const offset=initialNodeOffsets[graph.nodes.length]??{x:((graph.nodes.length%3)-1)*340,y:(Math.floor(graph.nodes.length/3)-1)*230};
+    const mode=defaultExecutionMode(type);
+    const config=type==='film.story-input'?{prompt:'Describe what you want to create.'}:mode==='local'?{}:{executionMode:mode};
+    const node:GraphNode={id,type,position:source?{x:source.position.x+410,y:source.position.y+80}:{x:canvasCenter.x+offset.x,y:canvasCenter.y+offset.y},
+      runtime:'local',config};
     const sourceDef=source&&NODE_DEFINITIONS.find(n=>n.type===source.type);
     const output=sourceDef?.outputs[0];
     const targetPort=output&&def.inputs.find(input=>input.type===output.type);
     const edge=source&&output&&targetPort?{id:`edge-${crypto.randomUUID()}`,source:source.id,sourceHandle:output.id,target:node.id,targetHandle:targetPort.id}:null;
-    changeGraph(g=>({...g,nodes:[...g.nodes,node],edges:edge?[...g.edges,edge]:g.edges}));setSelectedId(id);setPickerOpen(false);setBranchFrom(null);
+    changeGraph(g=>({...g,nodes:[...g.nodes,node],edges:edge?[...g.edges,edge]:g.edges}));setSelectedId(id);setInspectorOpen(type!=='film.story-input');setPickerOpen(false);setBranchFrom(null);
     setNotice(`Added ${def.label}. Connect its required ports before running.`);
   };
   const openBranchPicker=(nodeId:string)=>{setBranchFrom(nodeId);setPickerFilter('');setPickerOpen(true);};
@@ -161,18 +177,20 @@ export default function App() {
       setRevision(newRevision);setDirty(false);setNotice(`Saved revision ${newRevision}`);
     } catch(e){setError(String(e));} finally{setSaving(false);}
   };
-  const start=async()=>{
+  const start=async(nodeId?:string)=>{
     if(!project)return;
     setError('');setNotice('');
     try {
-      const validation=await window.znith.workflows.validate(graph);
-      if(!validation.valid){setError(validation.errors.join('\n'));return;}
+      if(!nodeId){
+        const validation=await window.znith.workflows.validate(graph);
+        if(!validation.valid){setError(validation.errors.join('\n'));return;}
+      }
       if(dirty) {
         const next=await window.znith.workflows.save(project.project.workflowId,graph,revision);
         setRevision(next);setDirty(false);
       }
-      const id=await window.znith.runs.start(project.project.workflowId);
-      setRunId(id);setArtifactText('');setNotice('Workflow started');
+      const id=await window.znith.runs.start(project.project.workflowId,nodeId);
+      setRunId(id);setArtifactText('');setNotice(nodeId?'Node and its upstream inputs started':'Workflow started');
     }catch(e){setError(String(e));}
   };
   const showArtifact=async(artifactId:string)=>{
@@ -184,11 +202,11 @@ export default function App() {
   const pickerNodes=NODE_DEFINITIONS.filter(def=>!pickerFilter||`${def.label} ${def.type} ${def.category}`.toLowerCase().includes(pickerFilter.toLowerCase()));
   return <div className="studio-app">
     <header className="studio-topbar">
-      <div className="studio-brand"><span className="brand-mark">✦</span><b>ZNITH</b><span className="studio-brand-caption">VISUAL WORKFLOW</span></div>
+      <div className="studio-brand"><span className="brand-mark">✦</span><b>ZNITH</b><span className="studio-brand-caption">AI WORKFLOW STUDIO</span></div>
       <button className="workflow-title-button" onClick={()=>{if(dirty&&!window.confirm('Discard unsaved changes?'))return;window.history.pushState(null,'','/workflows');setView('management');}}>← <span>{project?.workflowName??'Workflow'}</span><small>{dirty?'● Chưa lưu':'● Đã lưu'}</small></button>
       <div className="studio-header-actions"><span className="node-count">⌘ {graph.nodes.length} nodes</span><span className={`run-state ${statusLabel.toLowerCase()}`}><i/>{statusLabel}</span><button className="studio-save" disabled={!dirty||saving} onClick={()=>void save()}>{saving?'Đang lưu…':dirty?'Lưu thay đổi':'Đã lưu'}</button><button className="studio-run" disabled={!project} onClick={()=>void start()}><span>▶</span> Sử dụng workflow</button></div>
     </header>
-    <div className="studio-workspace">
+      <div className="studio-workspace">
       <div className="studio-left-rail">
         <button className="rail-add" title="Thêm node" onClick={()=>{setBranchFrom(null);setPickerFilter('');setPickerOpen(true);}}>＋</button>
         <button title="Select" className="rail-active">↖</button>
@@ -210,7 +228,8 @@ export default function App() {
           <Background variant={BackgroundVariant.Dots} color="#303139" gap={22} size={1}/>
           <MiniMap zoomable pannable nodeColor="#9c80ed" maskColor="rgba(16,17,20,.78)" className="studio-minimap"/>
           <CanvasFooter/>
-          <Panel position="top-left" className="canvas-account"><span>✦</span><b>TobyFlow</b><small>LOCAL</small></Panel>
+          <Panel position="top-left" className="canvas-account"><span>✦</span><b>Znith</b><small>LOCAL</small></Panel>
+          {graph.nodes.length===0&&<Panel position="top-center" className="canvas-empty"><strong>Your canvas is empty</strong><span>Add a prompt or an action to start building a workflow.</span><button onClick={()=>{setPickerFilter('');setBranchFrom(null);setPickerOpen(true);}}>＋ Add your first node</button></Panel>}
           {run&&<Panel position="bottom-right" className={`canvas-run-banner ${run.status.toLowerCase()}`}><i/>{run.status} · {run.nodes.filter(n=>n.status==='SUCCEEDED').length}/{run.nodes.length} nodes{runId&&['RUNNING','READY','WAITING_APPROVAL'].includes(run.status)&&<button onClick={()=>void window.znith.runs.cancel(runId).catch(e=>setError(String(e)))}>Hủy</button>}</Panel>}
         </ReactFlow>
       </div>
@@ -221,13 +240,13 @@ export default function App() {
           {selectedNode.type==='media.image-reference'&&<><label className="field-title">Reference image</label><div className="image-path-row"><input className="field" value={String(selectedNode.config.sourcePath??'')} placeholder="Choose a local image…" readOnly/><button className="ghost" onClick={()=>void window.znith.files.pickImage().then(path=>{if(path)updateConfig('sourcePath',path);}).catch(e=>setError(String(e)))}>Browse</button></div><p className="muted tiny">PNG, JPG or WebP · max 8 MiB. Znith copies the selected image into the project when this node runs.</p></>}
           <label className="field-title">Runtime</label>
           <select className="field" value={selectedNode.runtime} onChange={e=>changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:e.target.value as GraphNode['runtime']}:n)}))}><option value="local">Local</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (explicit opt-in)</option></select>
-          {selectedNode.type==='media.audio-generate'&&<><label className="field-title">Narration mode</label><select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>updateConfig('executionMode',e.target.value)}><option value="mock">Mock (offline sample)</option><option value="piper">Piper — local TTS</option></select>{selectedNode.config.executionMode==='piper'&&<><label className="field-title">Piper voice model path</label><input className="field" value={String(selectedNode.config.voiceModelPath??'')} placeholder="Absolute path to voice .onnx" onChange={e=>updateConfig('voiceModelPath',e.target.value)}/></>}</>}
+          {selectedNode.type==='media.audio-generate'&&<><label className="field-title">Narration mode</label><select className="field" value={String(selectedNode.config.executionMode??'piper')} onChange={e=>updateConfig('executionMode',e.target.value)}><option value="piper">Piper · local text-to-speech</option><option value="mock">Mock · sample data</option></select>{selectedNode.config.executionMode!=='mock'&&<><label className="field-title">Piper voice model path</label><input className="field" value={String(selectedNode.config.voiceModelPath??'')} placeholder="Absolute path to voice .onnx" onChange={e=>updateConfig('voiceModelPath',e.target.value)}/></>}</>}
           {(selectedNode.type==='media.image-generate'||selectedNode.type==='media.video-generate'||selectedNode.type==='media.film-export')&&<>
-            <label className="field-title">Provider</label><select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>updateConfig('executionMode',e.target.value)}><option value="mock">Preview mode · Mock</option>{selectedNode.type==='media.film-export'?<option value="ffmpeg">FFmpeg · Export MP4</option>:<option value="comfyui">Flow · ComfyUI</option>}</select>
-            {selectedNode.config.executionMode==='comfyui'&&<><label className="field-title">ComfyUI address</label><input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:8188')} onChange={e=>updateConfig('endpoint',e.target.value)}/><label className="field-title">API workflow JSON</label><textarea className="field prompt-input" rows={8} spellCheck={false} placeholder="ComfyUI API graph; use $ZNITH_PROMPT and $ZNITH_INPUT_IMAGE" value={String(selectedNode.config.workflowJSON??'')} onChange={e=>updateConfig('workflowJSON',e.target.value)}/><p className="muted tiny">Flow generation uses your local ComfyUI graph and model. Nothing is uploaded by mock mode.</p></>}
+            <label className="field-title">Provider</label><select className="field" value={String(selectedNode.config.executionMode??(selectedNode.type==='media.film-export'?'ffmpeg':'comfyui'))} onChange={e=>updateConfig('executionMode',e.target.value)}><option value="mock">Mock · sample data</option>{selectedNode.type==='media.film-export'?<option value="ffmpeg">FFmpeg · Export MP4</option>:<option value="comfyui">ComfyUI · local image/video generation</option>}</select>
+            {selectedNode.config.executionMode==='comfyui'&&<><label className="field-title">ComfyUI address</label><input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:8188')} onChange={e=>updateConfig('endpoint',e.target.value)}/><label className="field-title">API workflow JSON</label><textarea className="field prompt-input" rows={8} spellCheck={false} placeholder="ComfyUI API graph; use $ZNITH_PROMPT and $ZNITH_INPUT_IMAGE" value={String(selectedNode.config.workflowJSON??'')} onChange={e=>updateConfig('workflowJSON',e.target.value)}/><p className="muted tiny">ComfyUI runs locally. Export the API format workflow from its UI and paste it here. Mock mode returns sample metadata only.</p></>}
           </>}
           {selectedNode.type==='film.story-input'&&<><label className="field-title">Prompt</label><textarea className="field prompt-input" rows={7} value={String(selectedNode.config.prompt??'')} onChange={e=>updateConfig('prompt',e.target.value)}/></>}
-          {selectedDefinition?.category==='skill'&&<><label className="field-title">AI execution</label><select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>{updateConfig('executionMode',e.target.value);if(e.target.value==='cloud')changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'cloud'}:n)}));if(e.target.value==='ollama')changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'local'}:n)}));}}><option value="mock">Mock</option><option value="ollama">Ollama · Local AI</option><option value="cloud">OpenAI-compatible · Cloud</option></select>{selectedNode.config.executionMode&&selectedNode.config.executionMode!=='mock'&&<><label className="field-title">Model</label><input className="field" value={String(selectedNode.config.model??'')} placeholder="e.g. qwen2.5:7b" onChange={e=>updateConfig('model',e.target.value)}/></>}{selectedNode.config.executionMode==='ollama'&&<><label className="field-title">Ollama address</label><input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:11434')} onChange={e=>updateConfig('endpoint',e.target.value)}/></>}</>}
+          {selectedDefinition?.category==='skill'&&<><label className="field-title">AI execution</label><select className="field" value={String(selectedNode.config.executionMode??'ollama')} onChange={e=>{updateConfig('executionMode',e.target.value);if(e.target.value==='cloud')changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'cloud'}:n)}));if(e.target.value==='ollama')changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'local'}:n)}));}}><option value="ollama">Ollama · Local AI</option><option value="cloud">OpenAI-compatible · Cloud</option><option value="mock">Mock · sample data</option></select>{selectedNode.config.executionMode!=='mock'&&<><label className="field-title">Model</label><input className="field" value={String(selectedNode.config.model??'')} placeholder="e.g. qwen2.5:7b" onChange={e=>updateConfig('model',e.target.value)}/></>}{selectedNode.config.executionMode==='ollama'&&<><label className="field-title">Ollama address</label><input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:11434')} onChange={e=>updateConfig('endpoint',e.target.value)}/><p className="muted tiny">Install Ollama and pull a model first. Znith sends this node and its inputs to your local Ollama service.</p></>}{selectedNode.config.executionMode==='cloud'&&<p className="muted tiny">Set ZNITH_CLOUD_LLM_API_KEY in the environment before starting Znith. Cloud execution sends this node's inputs to the configured provider.</p>}</>}
           <div className="inspector-separator"/><label className="field-title">Inputs</label>{selectedDefinition?.inputs.map(port=><div className="port-detail" key={port.id}><span>{port.id}{port.required?' *':''}</span><small>{port.type}{port.multiple?' · multiple':''}</small></div>)}<label className="field-title">Outputs</label>{selectedDefinition?.outputs.map(port=><div className="port-detail" key={port.id}><span>{port.id}</span><small>{port.type}</small></div>)}
           <div className="inspector-separator"/><label className="field-title">Execution</label><div className="port-detail"><span>Status</span><small>{selectedRun?.status??'Not run'}</small></div>{selectedRun?.error&&<pre className="error">{selectedRun.error}</pre>}
           {selectedRun?.status==='WAITING_APPROVAL'&&selectedNode.type==='logic.approval'&&<div className="approval-actions"><button className="run-button" onClick={()=>void window.znith.runs.approveNode(selectedRun.id,true).catch(e=>setError(String(e)))}>Approve</button><button className="ghost" onClick={()=>void window.znith.runs.approveNode(selectedRun.id,false).catch(e=>setError(String(e)))}>Reject</button></div>}
@@ -240,10 +259,12 @@ export default function App() {
     {(notice||error)&&<div className={`studio-toast ${error?'error-toast':''}`} role="status">{error||notice}<button onClick={()=>{setNotice('');setError('');}}>×</button></div>}
     {pickerOpen&&<div className="picker-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setPickerOpen(false);}}><div className="node-picker">
       <div className="picker-heading"><div><span className="eyebrow">{branchFrom?'CREATE BRANCH':'NODE LIBRARY'}</span><h3>{branchFrom?'Choose the next node':'Add to canvas'}</h3></div><button className="drawer-close" onClick={()=>setPickerOpen(false)}>×</button></div>
-      <input className="picker-search" autoFocus placeholder="Tìm node hoặc provider..." value={pickerFilter} onChange={e=>setPickerFilter(e.target.value)}/>
-      <div className="picker-hint">{branchFrom?`Node sẽ nối từ ${graph.nodes.find(n=>n.id===branchFrom)?.type} nếu cổng dữ liệu tương thích.`:'Kéo node vào canvas hoặc chọn để thêm.'}</div>
-      <div className="picker-results">{pickerNodes.map(def=><button key={def.type} className="picker-option" onClick={()=>addNode(def.type,branchFrom??undefined)}><span className={`picker-icon ${def.category}`}>{def.category==='input'?'T':def.category==='media'?'▧':def.category==='logic'?'⑂':'✦'}</span><span><b>{def.label}</b><small>{def.type==='media.image-generate'||def.type==='media.video-generate'?'Flow provider · ComfyUI adapter':def.description}</small></span><span className="picker-add">＋</span></button>)}</div>
-      <div className="picker-foot">↑↓ Di chuyển <span>Enter Chọn</span> Esc Đóng</div>
+      <input className="picker-search" autoFocus placeholder="Search nodes..." value={pickerFilter} onChange={e=>setPickerFilter(e.target.value)} onKeyDown={e=>{if(e.key==='Escape')setPickerOpen(false);if(e.key==='Enter'&&pickerNodes[0])addNode(pickerNodes[0].type,branchFrom??undefined);}}/>
+      <div className="picker-hint">{branchFrom?`New node will connect from ${graph.nodes.find(n=>n.id===branchFrom)?.type} when ports match.`:'Select a node to add it to the canvas.'}</div>
+      <div className="picker-results">{pickerNodes.map(def=><button key={def.type} className="picker-option" onClick={()=>addNode(def.type,branchFrom??undefined)}><span className={`picker-icon ${def.category}`}>{def.category==='input'?'T':def.category==='media'?'▧':def.category==='logic'?'⑂':'✦'}</span><span><b>{def.label}</b><small>{def.type==='media.image-generate'||def.type==='media.video-generate'?'ComfyUI local provider':def.description}</small></span><span className="picker-add">＋</span></button>)}</div>
+      <div className="picker-foot">Enter to add first result <span>Esc to close</span></div>
     </div></div>}
   </div>;
 }
+
+export default function App(){return <ReactFlowProvider><AppContent/></ReactFlowProvider>;}
