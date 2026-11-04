@@ -1,30 +1,27 @@
-# Znith Desktop — MVP Phase 1+2
+# Znith AI Visual Workflow Studio
 
-> **Development update (v0.3 branch):** Real Ollama text, user-approved storyboards, model-specific ComfyUI image/video, offline Piper TTS, FFmpeg MP4 export, and optional Reelbench analysis adapters have been implemented behind explicit per-node execution modes. See [Desktop AI Pipeline Guide](docs/DESKTOP_AI_PIPELINE.md). Mock remains the default. This branch still needs live model/installer testing and does not bundle model weights or upstream scripts.
+Znith is a local-first desktop studio for building and running AI filmmaking workflows. It combines Electron, React, Vite, React Flow, SQLite, Drizzle, and a persistent local DAG scheduler. The workflow editor supports typed nodes, ports, validation, execution status, approvals, artifacts, and local media generation adapters.
 
+## Workflow management
 
-**Local-first AI Filmmaking Node Canvas** built with Electron, React, Vite, React Flow, SQLite, Drizzle ORM and a persistent local DAG scheduler. Runs **offline mock nodes** for Story → Script → Storyboard; no Docker, PostgreSQL, Redis, MinIO, Ollama, ComfyUI, cloud key or account needed for this phase.
+The `/workflows` screen is the starting point. It lists workflows across projects with search, run-status filters, sorting, and pagination. From the table you can open, create, run or restart, rename, duplicate, and delete workflows. Each workflow opens at `/workflows/:workflowId/editor`.
 
-> **Scope:** This is a working-source MVP scaffold, **not** a production-ready installer or real video generator. AI models, approval actions, batch fan-out, video/audio generation, signed installers and cloud providers are **not** implemented. Media node mock outputs are JSON placeholders, **not actual image/video files**.
+The editor provides a pannable and zoomable canvas, node library, typed connections, node configuration inspector, execution history, approval actions, retry/cancel controls, and artifact previews. Graph drafts may be saved before they are runnable; execution validates required ports, types, and cycles.
 
-## Prerequisites
+## Local development
 
-- Node.js **22 LTS** (Electron native build support required)
-- pnpm **10.18.2**: `corepack enable && corepack prepare pnpm@10.18.2 --activate`
-- Git
-- Desktop session with Electron's OS libraries (Linux users need system GTK/NSS/X11 or Wayland dependencies)
-- Network access to install npm dependencies (installer/download Electron and native sqlite modules)
-
-## Quick start
+Requirements: Node.js 22 or newer, pnpm 10.18.2, and a desktop session for running Electron.
 
 ```bash
+corepack enable
+corepack prepare pnpm@10.18.2 --activate
 pnpm install
 pnpm dev
 ```
 
-The app creates its own SQLite database, **no server needed**. AI text/media modes require separately installed local services or explicitly configured cloud credentials. On first launch it creates **First Film** with three connected nodes, all using deterministic mock executors. Hit **Run Mock**, select a node, and click **View ... JSON** to inspect its saved artifact. Click **Save** after editing the canvas.
+The app creates a local SQLite database and a project directory under the operating system's Documents folder. The demo workflow uses deterministic mock outputs and does not require an AI service.
 
-### Build and test
+## Verification
 
 ```bash
 pnpm typecheck
@@ -33,76 +30,28 @@ pnpm build
 pnpm package:dir
 ```
 
-`package:dir` assembles an unpacked executable app in `apps/desktop/release/` for the current OS. This project has not yet been tested as an installer on Windows/macOS/Linux in this environment; verify packaging on each target platform. `pnpm package:win` and `pnpm package:linux` target those platforms from a compatible build machine. For pnpm 10, `pnpm-workspace.yaml` configures native dependency build approval via `onlyBuiltDependencies`.
+CI runs typecheck, tests, and the production build on pushes and pull requests. The committed lockfile is used for reproducible installs.
 
-Optional structural checks without installing npm dependencies (requires TypeScript globally installed):
+## Runtime options
 
-```bash
-npm install -g typescript  # only if needed
-node scripts/check-offline.mjs
-```
+- **Text generation:** Mock by default, with Ollama local inference and an optional OpenAI-compatible cloud LLM adapter configured in the Electron main-process environment.
+- **Image and video:** Mock by default or ComfyUI API-format workflows on a local ComfyUI endpoint.
+- **Narration:** Mock audio or local Piper TTS with a configured voice model.
+- **Film export:** Mock output or FFmpeg MP4 export from generated clips and optional narration.
+- **Skills and analysis:** The repository includes adapters for the film skill flow and Reelbench analysis planning. It does not execute upstream skill shell scripts.
 
-## How it works
+Cloud execution is explicit per node. Local services are restricted to loopback addresses; secrets are kept outside workflow graphs. Providers, model weights, and external binaries are not bundled with the desktop app.
 
-1. A default project gets saved in `Documents/Znith Projects/First-Film-*`.
-2. `znith.sqlite` is stored in Electron's OS-specific `userData` directory.
-3. Graph state and immutable execution snapshots live in SQLite.
-4. `LocalScheduler` finds READY nodes from dependencies, marks them RUNNING atomically and emits status events via IPC.
-5. Mock executors create text JSON artifacts under `<project>/artifacts/<run-id>/<node-id>/`.
-6. Crash recovery resets unfinished RUNNING mock jobs to READY, allowing replay; no paid work is submitted.
+## Architecture
 
-### Design constraints
+- `apps/desktop/` — Electron main/preload, React renderer, React Flow editor, and UI tests.
+- `packages/contracts/` — shared graph, artifact, run, and IPC types.
+- `packages/database/` — SQLite schema, workflow/project persistence, and run history.
+- `packages/workflow-engine/` — graph validation and dependency handling.
+- `packages/local-runner/` — persistent local scheduler and node execution.
+- `packages/node-registry/` — typed filmmaking nodes and starter graph.
+- `packages/providers/`, `packages/media-engine/`, `packages/skill-runtime/` — provider and media adapters.
 
-- Save allows an incomplete graph draft. Run always validates types, required inputs, config and cycles.
-- The script node accepts **story OR outline** for the 3-node demonstration; full film graph may use the outline port.
-- Node ports are typed; the Canvas has 12 registered definitions.
-- The Approval Gate is a registered node that pauses in `WAITING_APPROVAL`; the decision UI is Phase 3.
-- Batch/media/export nodes produce mock JSON outputs only in this phase; they do not yet fan out shot renders.
-- A cloud runtime node is deliberately rejected at execution; it never silently uploads data.
-- Project artifact paths are relative, not absolute, and read through a restricted IPC handler.
-- SQLite uses WAL + foreign keys. v0.2 bootstraps schema version 1; future schema changes require versioned migrations.
+## Current limits
 
-## Repository layout
-
-```text
-apps/desktop/                  Electron main/preload, Vite/React Flow renderer, tests
-packages/contracts/            Shared Zod schemas, node/artifact/run contracts
-packages/node-registry/        12 typed node definitions, three-node default graph
-packages/workflow-engine/      Graph validation + dependency utilities
-packages/database/             SQLite/Drizzle repositories and schema
-packages/local-runner/         Persistent local DAG scheduler, mock executors
-scripts/check-offline.mjs      Dependency-free structural/smoke checks
-scripts/publish-github.sh      Creates a private GitHub repository, preserving commits
-```
-
-## Local project storage
-
-- Windows: Electron's `%APPDATA%/znith-desktop`-style userData path (actual path depends on app metadata) for SQLite; Windows Documents for project media.
-- macOS: `~/Library/Application Support/...` for SQLite and `~/Documents/Znith Projects/` for projects.
-- Linux: `~/.config/...` for SQLite and `~/Documents/Znith Projects/` for projects.
-
-## Git history and publication
-
-The source ZIP **includes `.git`** with Conventional Commits by module, not one giant commit. The GitHub connector available in this chat cannot create a new GitHub repository. To create and push it from your own computer, after installing/authenticating [GitHub CLI](https://cli.github.com/):
-
-```bash
-bash scripts/publish-github.sh d0hx4n2503/znith-desktop
-```
-
-This creates a **private** repository and pushes the existing history, subject to your GitHub permissions and repo name availability. No force push or overwrite is attempted.
-
-## Roadmap to Phase 3
-
-1. Ollama provider + structured screenplay/shot-list outputs.
-2. Pin and integrate `shuohao-skills` (outline, script, characters, storyboard), including their own validators.
-3. Approval decision UI and resumable paused runs.
-4. ComfyUI image/video providers, actual per-shot fan-out and FFmpeg MP4 export.
-5. `reelbench-skills` for analysis and export metadata tools after basic video export works.
-
-### Security note
-
-The Phase 1+2 renderer CSP permits inline scripts to support the Vite React development preamble. Before distribution, tighten the packaged CSP (remove `unsafe-inline`), implement strict navigation/resource policy, and perform a security review. Electron keeps context isolation enabled, sandbox enabled and Node integration disabled.
-
-## Continuous integration
-
-`.github/workflows/ci.yml` runs `pnpm typecheck`, `pnpm test`, and `pnpm build` on GitHub Actions after the repository is published. Because the sandbox cannot reach npm registry, the workflow has **not** been executed yet. It temporarily uses `pnpm install --no-frozen-lockfile` until a lockfile is generated and committed; then switch to `--frozen-lockfile`.
+This is a working desktop application, but target OS installers and real AI models/services must be verified on the machines where they will run. The app does not install model weights, ComfyUI custom nodes, Piper voices, or FFmpeg. Upstream `shuohao-skills` scripts and quality gates are not executed; Reelbench support is an adapter rather than a full analysis pipeline.

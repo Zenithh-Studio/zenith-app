@@ -6,14 +6,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-const require=createRequire(import.meta.url);
+const root=resolve(import.meta.dirname,'..');
+const require=createRequire(join(root,'apps/desktop/package.json'));
 let ts;
 try {ts=require('typescript');}
 catch {
   const globalRoot=execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim();
   ts=require(join(globalRoot,'typescript'));
 }
-const root=resolve(import.meta.dirname,'..');
 function allFiles(directory){
   return readdirSync(directory,{withFileTypes:true}).flatMap(e=>{
     if(['.git','node_modules','dist','dist-electron'].includes(e.name))return [];
