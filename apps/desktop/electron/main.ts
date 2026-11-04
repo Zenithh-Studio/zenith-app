@@ -47,6 +47,13 @@ function registerIPC():void {
   ipcMain.handle('runs:cancel',(_e,id:unknown)=>scheduler.cancelRun(idSchema.parse(id)));
   ipcMain.handle('runs:retry',(_e,id:unknown)=>scheduler.retryNode(idSchema.parse(id)));
   ipcMain.handle('runs:approve',(_e,id:unknown,approved:unknown)=>scheduler.approveNode(idSchema.parse(id),z.boolean().parse(approved)));
+  ipcMain.handle('artifacts:reveal',(_e,id:unknown)=>{
+    const artifact=database.findArtifact(idSchema.parse(id));
+    if(!artifact)throw new Error('Artifact missing');
+    const project=database.listProjects().find(p=>p.id===artifact.projectId);
+    if(!project)throw new Error('Project missing');
+    shell.showItemInFolder(secureArtifactPath(project.rootPath,artifact.relativePath));
+  });
   ipcMain.handle('artifacts:read-text',async(_e,id:unknown)=>{
     const row=database.findArtifact(idSchema.parse(id));
     if(!row) throw new Error('Artifact missing');
