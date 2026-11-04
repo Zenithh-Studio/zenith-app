@@ -1,0 +1,1 @@
+{"name":"@znith/database","version":"0.2.0","private":true,"type":"module","exports":{".":"./src/index.ts"},"dependencies":{"@znith/contracts":"workspace:*","@znith/node-registry":"workspace:*","better-sqlite3":"^12.2.0","drizzle-orm":"^0.44.5"},"devDependencies":{"@types/better-sqlite3":"^7.6.13"}}
