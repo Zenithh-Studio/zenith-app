@@ -199,6 +199,21 @@ export default function App() {
           <select className="field" value={selectedNode.runtime} onChange={e=>changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:e.target.value as GraphNode['runtime']}:n)}))}>
             <option value="local">Local</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (explicit opt-in)</option>
           </select>
+          {(selectedNode.type==='media.image-generate'||selectedNode.type==='media.video-generate'||selectedNode.type==='media.film-export')&&<>
+            <label className="field-title">Media execution</label>
+            <select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>updateConfig('executionMode',e.target.value)}>
+              <option value="mock">Mock</option>
+              {selectedNode.type==='media.film-export'
+                ? <option value="ffmpeg">FFmpeg — export real clips</option>
+                : <option value="comfyui">ComfyUI — generate real media</option>}
+            </select>
+            {selectedNode.config.executionMode==='comfyui'&&<>
+              <label className="field-title">ComfyUI endpoint</label>
+              <input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:8188')} onChange={e=>updateConfig('endpoint',e.target.value)}/>
+              <label className="field-title">API workflow JSON</label>
+              <textarea className="field prompt-input" rows={10} spellCheck={false} placeholder="Paste ComfyUI API workflow JSON with $ZNITH_PROMPT and $ZNITH_INPUT_IMAGE placeholders" value={String(selectedNode.config.workflowJSON??'')} onChange={e=>updateConfig('workflowJSON',e.target.value)}/>
+            </>}
+          </>}
           {selectedNode.type==='film.story-input'&&<><label className="field-title">Story prompt</label>
             <textarea className="field prompt-input" value={String(selectedNode.config.prompt??'')} onChange={e=>updateConfig('prompt',e.target.value)} rows={8}/></>}
           {selectedDefinition?.category==='skill'&&<>
