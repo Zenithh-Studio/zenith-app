@@ -154,7 +154,7 @@ export default function App() {
         </select>
         <button className="ghost" onClick={()=>void createProject()}>+ Project</button>
         <button className="ghost" disabled={!project||!dirty||saving} onClick={()=>void save()}>{saving?'Saving...':dirty?'Save *':'Saved'}</button>
-        <button className="run-button" disabled={!project} onClick={()=>void start()}>▶ Run Mock</button>
+        <button className="run-button" disabled={!project} onClick={()=>void start()}>▶ Run Workflow</button>
       </div>
     </header>
     <div className="workspace">
@@ -167,7 +167,7 @@ export default function App() {
             <span className={`category-marker ${category}`}></span><span>{n.label}</span><span className="plus">+</span>
           </button>)}
         </section>)}
-        <div className="sidebar-foot"><span className="status-dot"/> Mock executor active<br/><small>No models or cloud keys required</small></div>
+        <div className="sidebar-foot"><span className="status-dot"/> Local-first execution<br/><small>Mock by default · Ollama opt-in</small></div>
       </aside>
       <main className="main-content">
         <div className="canvas-heading"><div><h2>Workflow Canvas</h2><small>{project?.project.name??'Loading...'} · revision {revision} {dirty?'· Unsaved':''}</small></div><span className="canvas-version">ZNITH v0.2 · PHASE 1+2</span></div>
@@ -185,7 +185,7 @@ export default function App() {
         </div>
         <div className="console-pane">
           <div className="console-title"><strong>Execution</strong><span className={`execution-pill ${run?.status?.toLowerCase()??''}`}>{run?.status??'IDLE'}</span>{runId&&<button className="link" onClick={()=>void window.znith.runs.cancel(runId).catch(e=>setError(String(e)))}>Cancel</button>}</div>
-          {run?<div className="run-steps">{run.nodes.map(n=><button onClick={()=>setSelectedId(n.nodeId)} key={n.id} className={`step ${n.status.toLowerCase()}`}><span className="step-dot"/>{n.nodeId}<small>{n.status}</small></button>)}</div>:<div className="console-empty">Run the demo graph to generate local mock Script and Storyboard JSON artifacts.</div>}
+          {run?<div className="run-steps">{run.nodes.map(n=><button onClick={()=>setSelectedId(n.nodeId)} key={n.id} className={`step ${n.status.toLowerCase()}`}><span className="step-dot"/>{n.nodeId}<small>{n.status}</small></button>)}</div>:<div className="console-empty">Start the workflow. Mock mode works offline; choose Ollama in the Inspector to generate real story data.</div>}
           {notice&&<div className="notice">{notice}</div>}
           {error&&<pre className="error">{error}</pre>}
         </div>
@@ -197,10 +197,30 @@ export default function App() {
           <p className="muted tiny">{selectedNode.type}<br/>{selectedNode.id}</p>
           <label className="field-title">Runtime</label>
           <select className="field" value={selectedNode.runtime} onChange={e=>changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:e.target.value as GraphNode['runtime']}:n)}))}>
-            <option value="local">Local mock</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (not implemented)</option>
+            <option value="local">Local</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (explicit opt-in)</option>
           </select>
           {selectedNode.type==='film.story-input'&&<><label className="field-title">Story prompt</label>
             <textarea className="field prompt-input" value={String(selectedNode.config.prompt??'')} onChange={e=>updateConfig('prompt',e.target.value)} rows={8}/></>}
+          {selectedDefinition?.category==='skill'&&<>
+            <label className="field-title">AI execution mode</label>
+            <select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>{
+              updateConfig('executionMode',e.target.value);
+              if(e.target.value==='cloud') changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'cloud'}:n)}));
+              if(e.target.value==='ollama') changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:'local'}:n)}));
+            }}>
+              <option value="mock">Mock — no model required</option>
+              <option value="ollama">Ollama — local AI</option>
+              <option value="cloud">Cloud LLM — explicit opt-in</option>
+            </select>
+            {selectedNode.config.executionMode!=='mock'&&selectedNode.config.executionMode!==undefined&&<>
+              <label className="field-title">Model name</label>
+              <input className="field" value={String(selectedNode.config.model??'')} placeholder="e.g. qwen2.5:7b" onChange={e=>updateConfig('model',e.target.value)}/>
+            </>}
+            {selectedNode.config.executionMode==='ollama'&&<>
+              <label className="field-title">Ollama endpoint</label>
+              <input className="field" value={String(selectedNode.config.endpoint??'http://127.0.0.1:11434')} onChange={e=>updateConfig('endpoint',e.target.value)}/>
+            </>}
+          </>}
           <div className="inspector-separator"/>
           <label className="field-title">Inputs</label>
           {selectedDefinition?.inputs.map(p=><div className="port-detail" key={p.id}><span>{p.id}{p.required?' *':''}</span><small>{p.type}</small></div>)}
@@ -210,6 +230,10 @@ export default function App() {
           <label className="field-title">Execution</label>
           <div className="port-detail"><span>Status</span><small>{selectedRun?.status??'Not run'}</small></div>
           {selectedRun?.error&&<pre className="error">{selectedRun.error}</pre>}
+          {selectedRun?.status==='WAITING_APPROVAL'&&selectedNode.type==='logic.approval'&&<div className="approval-actions">
+            <button className="run-button" onClick={()=>void window.znith.runs.approveNode(selectedRun.id,true).catch(e=>setError(String(e)))}>Approve storyboard</button>
+            <button className="ghost" onClick={()=>void window.znith.runs.approveNode(selectedRun.id,false).catch(e=>setError(String(e)))}>Reject</button>
+          </div>}
           {selectedRun?.status==='FAILED'&&<button className="ghost" onClick={()=>void window.znith.runs.retryNode(selectedRun.id).catch(e=>setError(String(e)))}>↻ Retry node</button>}
           {selectedRun?.outputRefs.map(a=><button className="artifact-link" key={a.id} onClick={()=>void showArtifact(a.id)}>▤ View {a.type} JSON</button>)}
           {artifactText&&<pre className="artifact-preview">{artifactText}</pre>}
