@@ -103,6 +103,7 @@ export interface ZnithAPI {
     get(id: string): Promise<RunSnapshot>;
     cancel(id: string): Promise<void>;
     retryNode(id: string): Promise<void>;
+    approveNode(id: string, approved: boolean): Promise<void>;
     subscribe(id: string, callback: (event: RunEvent) => void): () => void;
   };
   artifacts: { readText(id: string): Promise<string> };
