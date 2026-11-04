@@ -199,6 +199,18 @@ export default function App() {
           <select className="field" value={selectedNode.runtime} onChange={e=>changeGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedNode.id?{...n,runtime:e.target.value as GraphNode['runtime']}:n)}))}>
             <option value="local">Local</option><option value="auto">Auto (local-first)</option><option value="cloud">Cloud (explicit opt-in)</option>
           </select>
+          {selectedNode.type==='media.audio-generate'&&<>
+            <label className="field-title">Narration mode</label>
+            <select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>updateConfig('executionMode',e.target.value)}>
+              <option value="mock">Mock (offline sample)</option>
+              <option value="piper">Piper — local TTS</option>
+            </select>
+            {selectedNode.config.executionMode==='piper'&&<>
+              <label className="field-title">Piper voice model path</label>
+              <input className="field" value={String(selectedNode.config.voiceModelPath??'')} placeholder="Absolute path to voice .onnx" onChange={e=>updateConfig('voiceModelPath',e.target.value)}/>
+              <p className="muted tiny">Requires local Piper executable and voice model. Set ZNITH_PIPER_PATH if Piper is not on PATH.</p>
+            </>}
+          </>}
           {(selectedNode.type==='media.image-generate'||selectedNode.type==='media.video-generate'||selectedNode.type==='media.film-export')&&<>
             <label className="field-title">Media execution</label>
             <select className="field" value={String(selectedNode.config.executionMode??'mock')} onChange={e=>updateConfig('executionMode',e.target.value)}>
