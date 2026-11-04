@@ -6,6 +6,8 @@ import type { ArtifactRef, ArtifactType, GraphNode, RunEvent, RunStatus, Workflo
 import { validateGraph } from '@znith/workflow-engine';
 import type { ZnithDatabase } from '@znith/database';
 import { NODE_REGISTRY } from '@znith/node-registry';
+import { OllamaClient, OpenAICompatibleClient } from '@znith/providers';
+import { skillForNode, validateSkillOutput } from '@znith/skill-runtime';
 
 const PAUSE_MS = 180;
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((res, rej)=>{
@@ -137,7 +139,7 @@ export class LocalScheduler extends EventEmitter {
   }
   private async execute(runId:string,nodeRunId:string,node:GraphNode,graph:WorkflowGraph,signal:AbortSignal):Promise<void> {
     try {
-      if(node.runtime==='cloud') throw new Error('Cloud provider is not implemented in Phase 1+2');
+      if(node.runtime==='cloud' && node.config.executionMode!=='cloud') throw new Error('Explicit cloud executionMode required for remote processing');
       await wait(PAUSE_MS,signal);
       const project=this.db.projectForRun(runId);
       const inputByPort:Record<string, unknown>={};
@@ -150,7 +152,7 @@ export class LocalScheduler extends EventEmitter {
         const raw=await readFile(secureArtifactPath(project.rootPath,artifact.relativePath),'utf8');
         inputByPort[edge.targetHandle]=JSON.parse(raw);
       }
-      const produced=mockNode(node,inputByPort);
+      const produced=await executeFilmNode(node,inputByPort,signal);
       const outputPort=NODE_REGISTRY.get(node.type)?.outputs[0];
       if(!outputPort) throw new Error(`Node type ${node.type} is missing its output port`);
       const rel=`artifacts/${runId}/${node.id.replace(/[^a-zA-Z0-9_-]/g,'_')}/${randomUUID()}.json`;
@@ -206,4 +208,22 @@ export function mockNode(node:GraphNode,inputs:Record<string,unknown>):unknown {
     case 'logic.batch-shots':return {tasks:Array.isArray((source as any).shots)?(source as any).shots:[],mock:true};
     default:return {nodeType:node.type,inputs,placeholder:'Mock output only; media is not generated in Phase 1+2',mock:true};
   }
+}
+
+/** AI text execution is opt-in; the default stays offline and deterministic. */
+export async function executeFilmNode(node: GraphNode, inputs: Record<string,unknown>, signal: AbortSignal): Promise<unknown> {
+  const mode=String(node.config.executionMode??'mock');
+  if(mode==='mock') return mockNode(node,inputs);
+  const skill=skillForNode(node.type);
+  if(!skill) throw new Error(`Node ${node.type} does not yet have a real ${mode} executor; choose mock or configure a supported provider`);
+  const model=String(node.config.model??'');
+  if(!model) throw new Error('Set the model name in the node Inspector before running AI');
+  const output=mode==='ollama'
+    ? await new OllamaClient(String(node.config.endpoint??'http://127.0.0.1:11434')).generateJSON(model,skill.instructions,inputs,signal)
+    : mode==='cloud'
+      ? await new OpenAICompatibleClient(process.env.ZNITH_CLOUD_LLM_API_KEY??'').generateJSON(model,skill.instructions,inputs,signal)
+      : null;
+  if(!output) throw new Error('Unsupported executionMode: '+mode);
+  validateSkillOutput(skill.id,output);
+  return output;
 }
