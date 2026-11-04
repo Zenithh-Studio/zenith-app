@@ -21,7 +21,7 @@ async function createWindow():Promise<void> {
     backgroundColor:'#0e1018',
     show:false,
     webPreferences:{
-      preload:join(__dirname,'preload.cjs'),
+      preload:join(__dirname,'preload.js'),
       contextIsolation:true,nodeIntegration:false,sandbox:true,
     },
   });
