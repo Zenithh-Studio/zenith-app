@@ -12,6 +12,7 @@
     "@znith/workflow-engine": "workspace:*",
     "@znith/node-registry": "workspace:*",
     "@znith/providers": "workspace:*",
-    "@znith/skill-runtime": "workspace:*"
+    "@znith/skill-runtime": "workspace:*",
+    "@znith/media-engine": "workspace:*"
   }
 }
