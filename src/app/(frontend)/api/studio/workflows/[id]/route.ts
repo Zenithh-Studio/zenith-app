@@ -1,72 +1,56 @@
-import { z } from 'zod'
-import { getPayloadClient } from '@/lib/payload'
-import { workflowDefinitionSchema } from '@/core/workflow/engine'
+import { updateWorkflowRequestSchema } from '@znith/contracts'
+import { getWorkflowService } from '@/lib/backend-services'
+import { backendUnavailableResponse } from '@/lib/backend-api-response'
 
-const updateSchema = z
-  .object({
-    name: z.string().trim().min(1).max(120).optional(),
-    description: z.string().max(1000).optional(),
-    definition: workflowDefinitionSchema.optional(),
-  })
-  .strict()
+type WorkflowRouteContext = { params: Promise<{ id: string }> }
 
-export async function GET(_request: Request, context: RouteContext<'/api/studio/workflows/[id]'>) {
+export async function GET(_request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
-  const payload = (await getPayloadClient()) as any
   try {
-    const workflow = await payload.findByID({
-      collection: 'workflows',
-      id,
-      overrideAccess: false,
-      depth: 0,
-    })
-    const executions = await payload.find({
-      collection: 'executions',
-      overrideAccess: false,
-      depth: 0,
-      limit: 20,
-      sort: '-startedAt',
-      where: { workflow: { equals: id } },
-    })
-    return Response.json({ workflow, executions: executions.docs })
+    const workflowService = await getWorkflowService()
+    const { workflow, executions } = await workflowService.getWorkflow(id)
+    if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
+    return Response.json({ workflow, executions })
   } catch {
-    return Response.json({ error: 'Workflow not found.' }, { status: 404 })
+    return backendUnavailableResponse()
   }
 }
 
-export async function PATCH(request: Request, context: RouteContext<'/api/studio/workflows/[id]'>) {
+export async function PATCH(request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
-  const parsed = updateSchema.safeParse(await request.json())
-  if (!parsed.success) {
+  let requestBody: unknown
+  try {
+    requestBody = await request.json()
+  } catch {
+    return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 })
+  }
+
+  const parsedRequest = updateWorkflowRequestSchema.safeParse(requestBody)
+  if (!parsedRequest.success) {
     return Response.json(
-      { error: 'Invalid workflow update.', issues: parsed.error.flatten() },
+      { error: 'Invalid workflow update.', issues: parsedRequest.error.flatten() },
       { status: 400 },
     )
   }
-  const payload = (await getPayloadClient()) as any
+
   try {
-    const workflow = await payload.update({
-      collection: 'workflows',
-      id,
-      overrideAccess: false,
-      data: parsed.data,
-    })
+    const workflowService = await getWorkflowService()
+    const workflow = await workflowService.updateWorkflow(id, parsedRequest.data)
+    if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json({ workflow })
   } catch {
-    return Response.json({ error: 'Workflow could not be updated.' }, { status: 400 })
+    return backendUnavailableResponse()
   }
 }
 
-export async function DELETE(
-  _request: Request,
-  context: RouteContext<'/api/studio/workflows/[id]'>,
-) {
+export async function DELETE(_request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
-  const payload = (await getPayloadClient()) as any
   try {
-    await payload.delete({ collection: 'workflows', id, overrideAccess: false })
+    const workflowService = await getWorkflowService()
+    const deleted = await workflowService.deleteWorkflow(id)
+    if (!deleted) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return new Response(null, { status: 204 })
   } catch {
-    return Response.json({ error: 'Workflow could not be deleted.' }, { status: 400 })
+    return backendUnavailableResponse()
   }
 }

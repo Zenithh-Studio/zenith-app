@@ -3,12 +3,7 @@ import { buildFigmaConfig } from '@payloadcms/figma'
 import { mcpPlugin } from '@payloadcms/plugin-mcp'
 import { en as adminLanguage } from '@payloadcms/translations/languages/en'
 import { fileURLToPath } from 'url'
-import { Admins } from './collections/Admins'
-import { Media } from './collections/Media'
-import { Folders } from './collections/Folders'
-import { Tags } from './collections/Tags'
-import { Workflows } from './collections/Workflows'
-import { Executions } from './collections/Executions'
+import { Admins, Executions, Folders, Media, Tags, Workflows } from '@znith/be/collections'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)

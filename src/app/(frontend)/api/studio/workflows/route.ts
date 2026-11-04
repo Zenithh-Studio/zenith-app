@@ -1,56 +1,39 @@
-import { z } from 'zod'
-import { getPayloadClient } from '@/lib/payload'
-import { workflowDefinitionSchema } from '@/core/workflow/engine'
-import { workflowTemplates } from '@/core/workflow/templates'
-
-const createSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  description: z.string().max(1000).optional(),
-  templateId: z.enum(['blank', 'story', 'creative', 'video']).default('blank'),
-  definition: workflowDefinitionSchema.optional(),
-})
+import { createWorkflowRequestSchema } from '@znith/contracts'
+import { getWorkflowService } from '@/lib/backend-services'
+import { backendUnavailableResponse } from '@/lib/backend-api-response'
 
 export async function GET(request: Request) {
-  const url = new URL(request.url)
-  const search = url.searchParams.get('search')?.trim()
-  const payload = (await getPayloadClient()) as any
-  const result = await payload.find({
-    collection: 'workflows',
-    overrideAccess: false,
-    depth: 0,
-    limit: 100,
-    sort: '-updatedAt',
-    ...(search
-      ? {
-          where: {
-            or: [{ name: { contains: search } }, { description: { contains: search } }],
-          },
-        }
-      : {}),
-  })
-  return Response.json({ docs: result.docs })
+  const search = new URL(request.url).searchParams.get('search') ?? undefined
+  try {
+    const workflowService = await getWorkflowService()
+    const workflows = await workflowService.listWorkflows(search)
+    return Response.json({ docs: workflows })
+  } catch {
+    return backendUnavailableResponse()
+  }
 }
 
 export async function POST(request: Request) {
-  const parsed = createSchema.safeParse(await request.json())
-  if (!parsed.success) {
+  let requestBody: unknown
+  try {
+    requestBody = await request.json()
+  } catch {
+    return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 })
+  }
+
+  const parsedRequest = createWorkflowRequestSchema.safeParse(requestBody)
+  if (!parsedRequest.success) {
     return Response.json(
-      { error: 'Invalid workflow data.', issues: parsed.error.flatten() },
+      { error: 'Invalid workflow data.', issues: parsedRequest.error.flatten() },
       { status: 400 },
     )
   }
-  const template = workflowTemplates[parsed.data.templateId]
-  const payload = (await getPayloadClient()) as any
-  const workflow = await payload.create({
-    collection: 'workflows',
-    overrideAccess: false,
-    data: {
-      name: parsed.data.name ?? template.name,
-      description: parsed.data.description ?? template.description,
-      category: template.category,
-      status: 'idle',
-      definition: parsed.data.definition ?? structuredClone(template.definition),
-    },
-  })
-  return Response.json({ workflow }, { status: 201 })
+
+  try {
+    const workflowService = await getWorkflowService()
+    const workflow = await workflowService.createWorkflow(parsedRequest.data)
+    return Response.json({ workflow }, { status: 201 })
+  } catch {
+    return backendUnavailableResponse()
+  }
 }

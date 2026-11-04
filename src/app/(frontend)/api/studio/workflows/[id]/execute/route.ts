@@ -1,82 +1,29 @@
-import { z } from 'zod'
-import { getPayloadClient } from '@/lib/payload'
-import { runWorkflow } from '@/core/workflow/engine'
-import type { WorkflowDefinition } from '@/core/workflow/types'
+import { executeWorkflowRequestSchema } from '@znith/contracts'
+import { getWorkflowService } from '@/lib/backend-services'
+import { backendUnavailableResponse } from '@/lib/backend-api-response'
 
-const executeSchema = z.object({
-  targetNodeId: z.string().min(1).optional(),
-})
+type WorkflowExecutionRouteContext = { params: Promise<{ id: string }> }
 
-export async function POST(
-  request: Request,
-  context: RouteContext<'/api/studio/workflows/[id]/execute'>,
-) {
+export async function POST(request: Request, context: WorkflowExecutionRouteContext) {
   const { id } = await context.params
-  const parsed = executeSchema.safeParse(await request.json())
-  if (!parsed.success)
-    return Response.json({ error: 'Invalid execution request.' }, { status: 400 })
-
-  const payload = (await getPayloadClient()) as any
-  let workflow
+  let requestBody: unknown
   try {
-    workflow = await payload.findByID({
-      collection: 'workflows',
-      id,
-      overrideAccess: false,
-      depth: 0,
-    })
+    requestBody = await request.json()
   } catch {
-    return Response.json({ error: 'Workflow not found.' }, { status: 404 })
+    return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 })
   }
 
-  const startedAt = new Date()
-  const snapshot = structuredClone(workflow.definition) as WorkflowDefinition
-  const execution = await payload.create({
-    collection: 'executions',
-    overrideAccess: false,
-    data: {
-      workflow: id,
-      status: 'running',
-      scope: parsed.data.targetNodeId
-        ? `node:${parsed.data.targetNodeId}:with-dependencies`
-        : 'workflow',
-      startedAt: startedAt.toISOString(),
-      snapshot,
-      nodeRecords: [],
-      logs: [],
-    },
-  })
-  await payload.update({
-    collection: 'workflows',
-    id,
-    overrideAccess: false,
-    data: { status: 'running', lastExecutionAt: startedAt.toISOString() },
-  })
+  const parsedRequest = executeWorkflowRequestSchema.safeParse(requestBody)
+  if (!parsedRequest.success) {
+    return Response.json({ error: 'Invalid execution request.' }, { status: 400 })
+  }
 
-  const result = await runWorkflow(snapshot, parsed.data.targetNodeId)
-  const completedAt = new Date()
-  await payload.update({
-    collection: 'executions',
-    id: execution.id,
-    overrideAccess: false,
-    data: {
-      status: result.status,
-      completedAt: completedAt.toISOString(),
-      durationMs: completedAt.getTime() - startedAt.getTime(),
-      nodeRecords: result.records,
-      logs: result.logs,
-      error: result.error,
-    },
-  })
-  await payload.update({
-    collection: 'workflows',
-    id,
-    overrideAccess: false,
-    data: { status: result.status, lastExecutionAt: completedAt.toISOString() },
-  })
-
-  return Response.json(
-    { executionId: execution.id, ...result },
-    { status: result.status === 'failed' ? 422 : 200 },
-  )
+  try {
+    const workflowService = await getWorkflowService()
+    const execution = await workflowService.execute(id, parsedRequest.data)
+    if (!execution) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
+    return Response.json(execution, { status: execution.status === 'failed' ? 422 : 200 })
+  } catch {
+    return backendUnavailableResponse()
+  }
 }
