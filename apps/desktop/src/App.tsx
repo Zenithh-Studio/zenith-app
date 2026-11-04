@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow, Background, BackgroundVariant, MiniMap, Panel, ReactFlowProvider,
-  applyNodeChanges, applyEdgeChanges, useReactFlow, useNodesInitialized,
+  useReactFlow, useNodesInitialized, useViewport,
   type Node, type Edge, type Connection, type NodeChange, type EdgeChange
 } from '@xyflow/react';
 import { NODE_DEFINITIONS } from '@znith/node-registry';
+import { updateGraphNodes, validateConnection } from '@znith/workflow-engine';
 import { graphSchema, type GraphNode, type ProjectData,
   type MediaPreview, type RunSnapshot, type WorkflowGraph } from '@znith/contracts';
 import FlowNode from './FlowNode';
@@ -14,15 +15,42 @@ const nodeTypes={znith:FlowNode};
 const emptyGraph:WorkflowGraph={schemaVersion:2,nodes:[],edges:[]};
 const defaultExecutionMode=(type:string)=>['media.image-generate','media.video-generate'].includes(type)?'comfyui':type==='media.audio-generate'?'piper':type==='media.film-export'?'ffmpeg':['film.outline','film.script','film.characters','film.storyboard'].includes(type)?'ollama':'local';
 const initialNodeOffsets=[{x:0,y:0},{x:340,y:0},{x:-340,y:0},{x:0,y:230},{x:340,y:230},{x:-340,y:230},{x:0,y:-230},{x:340,y:-230},{x:-340,y:-230}];
+function gridOffset(index:number){
+  if(index<initialNodeOffsets.length)return initialNodeOffsets[index];
+  const offset=index-initialNodeOffsets.length;
+  return {x:(offset%3-1)*340,y:(2+Math.floor(offset/3))*230};
+}
+function findFreePosition(center:{x:number;y:number},nodes:GraphNode[],startIndex=nodes.length,ignoreId?:string){
+  for(let index=startIndex;index<startIndex+nodes.length+100;index++){
+    const offset=gridOffset(index),candidate={x:center.x+offset.x,y:center.y+offset.y};
+    if(nodes.every(node=>node.id===ignoreId||Math.abs(node.position.x-candidate.x)>=320||Math.abs(node.position.y-candidate.y)>=220))return candidate;
+  }
+  return {x:center.x,y:center.y+(startIndex+nodes.length)*240};
+}
+function findBranchPosition(source:GraphNode,nodes:GraphNode[]){
+  const candidates=[{x:340,y:20},{x:340,y:250},{x:340,y:-210},{x:680,y:20},{x:0,y:250},{x:0,y:-230},{x:-340,y:20},{x:680,y:250},{x:680,y:-210}];
+  for(const offset of candidates){
+    const position={x:source.position.x+offset.x,y:source.position.y+offset.y};
+    if(nodes.every(node=>node.id===source.id||Math.abs(node.position.x-position.x)>=320||Math.abs(node.position.y-position.y)>=220))return position;
+  }
+  return findFreePosition({x:source.position.x+340,y:source.position.y+20},nodes,nodes.length,source.id);
+}
 
-function CanvasFooter(){
-  const {fitView,zoomIn,zoomOut}=useReactFlow();
-  return <Panel position="bottom-left" className="viewport-tools"><button onClick={()=>void zoomIn()}>＋</button><button onClick={()=>void zoomOut()}>−</button><button className="zoom-value" onClick={()=>void fitView({padding:.18,duration:240})}>FIT</button><button title="Fit canvas" onClick={()=>void fitView({padding:.18,duration:240})}>⤢</button></Panel>;
+function CanvasFooter({selectedId}:{selectedId:string|null}){
+  const {fitView,zoomIn,zoomOut,getNode,setCenter}=useReactFlow();
+  const {zoom}=useViewport();
+  const center=()=>{
+    const node=selectedId?getNode(selectedId):undefined;
+    if(node)void setCenter(node.position.x+(node.measured?.width??280)/2,node.position.y+(node.measured?.height??180)/2,{zoom,duration:240});
+    else void fitView({padding:.18,duration:240});
+  };
+  return <Panel position="bottom-left" className="viewport-tools"><button title="Zoom in" onClick={()=>void zoomIn()}>＋</button><span className="zoom-value">{Math.round(zoom*100)}%</span><button title="Zoom out" onClick={()=>void zoomOut()}>−</button><button title="Center selected node or fit all" onClick={center}>◎</button></Panel>;
 }
 
 function AppContent() {
   const {fitView,screenToFlowPosition}=useReactFlow();
   const nodesInitialized=useNodesInitialized();
+  const lastFitWorkflowId=useRef<string|null>(null);
   const [view,setView]=useState<'management'|'editor'>(()=>window.location.pathname.endsWith('/editor')?'editor':'management');
   const [project,setProject]=useState<ProjectData|null>(null);
   const [graph,setGraph]=useState<WorkflowGraph>(emptyGraph);
@@ -40,10 +68,12 @@ function AppContent() {
   const [pickerFilter,setPickerFilter]=useState('');
   const [branchFrom,setBranchFrom]=useState<string|null>(null);
   const [previews,setPreviews]=useState<Record<string,MediaPreview>>({});
+  const [toolMode,setToolMode]=useState<'select'|'pan'>('select');
 
   const openWorkflow=useCallback(async(id:string,updateAddress=true)=>{
     try {
       const data=await window.znith.workflows.open(id);
+      lastFitWorkflowId.current=null;
       setProject(data);setGraph(data.graph);setRevision(data.revision);setRun(null);
       setRunId(await window.znith.runs.latest(data.project.workflowId));setArtifactText('');setSelectedId(null);setDirty(false);setError('');
       setView('editor');
@@ -60,7 +90,11 @@ function AppContent() {
     return()=>window.removeEventListener('popstate',syncRoute);
   },[openWorkflow]);
   useEffect(()=>{
-    if(view!=='editor'||!project?.project.workflowId||graph.nodes.length===0||!nodesInitialized)return;
+    const workflowId=project?.project.workflowId;
+    if(view!=='editor'||!workflowId||lastFitWorkflowId.current===workflowId)return;
+    if(graph.nodes.length===0){lastFitWorkflowId.current=workflowId;return;}
+    if(!nodesInitialized)return;
+    lastFitWorkflowId.current=workflowId;
     const frame=requestAnimationFrame(()=>void fitView({padding:.18,duration:0}));
     return()=>cancelAnimationFrame(frame);
   },[fitView,graph.nodes.length,nodesInitialized,project?.project.workflowId,view]);
@@ -103,45 +137,45 @@ function AppContent() {
     type:'smoothstep',animated:run?.nodes.some(n=>n.nodeId===e.target&&n.status==='RUNNING')??false,
     style:{stroke:'#737996',strokeWidth:1.8},
   })),[graph.edges,run]);
-  const changeGraph=(updater:(prev:WorkflowGraph)=>WorkflowGraph)=>{
+  const changeGraph=useCallback((updater:(prev:WorkflowGraph)=>WorkflowGraph)=>{
     setGraph(updater);setDirty(true);setNotice('');
-  };
+  },[]);
   const onNodesChange=useCallback((changes:NodeChange[])=>{
-    const structural=changes.filter(c=>['position','remove','add','replace'].includes(c.type));
-    if(structural.length===0)return;
-    changeGraph(prev=>{
-      const current:Node[]=prev.nodes.map(n=>({id:n.id,type:'znith',position:n.position,data:{}}));
-      const changed=applyNodeChanges(structural,current);
-      const positions=new Map(changed.map(n=>[n.id,n.position]));
-      return {...prev,nodes:prev.nodes.filter(n=>positions.has(n.id)).map(n=>({...n,position:positions.get(n.id)!})),
-        edges:prev.edges.filter(e=>positions.has(e.source)&&positions.has(e.target))};
-    });
-  },[]);
+    const positions=new Map<string,{x:number;y:number}>();
+    const removed=new Set<string>();
+    for(const change of changes){
+      if(change.type==='position'&&change.position)positions.set(change.id,change.position);
+      else if(change.type==='remove')removed.add(change.id);
+    }
+    if(positions.size===0&&removed.size===0)return;
+    changeGraph(prev=>updateGraphNodes(prev,positions,removed));
+  },[changeGraph]);
   const onEdgesChange=useCallback((changes:EdgeChange[])=>{
-    const structural=changes.filter(c=>['remove','add','replace'].includes(c.type));
-    if(structural.length===0)return;
-    changeGraph(prev=>{
-      const base:Edge[]=prev.edges.map(e=>({...e,type:'smoothstep'}));
-      const edges=applyEdgeChanges(structural,base);
-      return {...prev,edges:edges.map(e=>({id:e.id,source:e.source,target:e.target,sourceHandle:e.sourceHandle??'',targetHandle:e.targetHandle??''}))};
-    });
-  },[]);
+    const removed=new Set(changes.filter(change=>change.type==='remove').map(change=>change.id));
+    if(removed.size)changeGraph(prev=>({...prev,edges:prev.edges.filter(edge=>!removed.has(edge.id))}));
+  },[changeGraph]);
+  const connectionProblem=useCallback((connection:Connection|Edge)=>validateConnection(graph,{
+    source:connection.source??'',sourceHandle:connection.sourceHandle??'',
+    target:connection.target??'',targetHandle:connection.targetHandle??'',
+  }),[graph]);
   const onConnect=useCallback((connection:Connection)=>{
-    if(!connection.sourceHandle||!connection.targetHandle) return;
+    const problem=connectionProblem(connection);
+    if(problem){setError(problem);return;}
+    setError('');
     changeGraph(prev=>({...prev,edges:[...prev.edges,{
       id:`edge-${crypto.randomUUID()}`,source:connection.source,target:connection.target,
       sourceHandle:connection.sourceHandle!,targetHandle:connection.targetHandle!
     }]}));
-  },[]);
+  },[changeGraph,connectionProblem]);
   const addNode=(type:string,fromNodeId?:string)=>{
     const def=NODE_DEFINITIONS.find(n=>n.type===type)!;
     const id=`${type.split('.').at(-1)}-${crypto.randomUUID().slice(0,5)}`;
     const source=graph.nodes.find(n=>n.id===fromNodeId);
     const canvasCenter=screenToFlowPosition({x:window.innerWidth*.52,y:window.innerHeight*.5});
-    const offset=initialNodeOffsets[graph.nodes.length]??{x:((graph.nodes.length%3)-1)*340,y:(Math.floor(graph.nodes.length/3)-1)*230};
     const mode=defaultExecutionMode(type);
     const config=type==='film.story-input'?{prompt:'Describe what you want to create.'}:mode==='local'?{}:{executionMode:mode};
-    const node:GraphNode={id,type,position:source?{x:source.position.x+410,y:source.position.y+80}:{x:canvasCenter.x+offset.x,y:canvasCenter.y+offset.y},
+    const branchPosition=source?findBranchPosition(source,graph.nodes):null;
+    const node:GraphNode={id,type,position:source?branchPosition!:findFreePosition(canvasCenter,graph.nodes),
       runtime:'local',config};
     const sourceDef=source&&NODE_DEFINITIONS.find(n=>n.type===source.type);
     const output=sourceDef?.outputs[0];
@@ -168,14 +202,18 @@ function AppContent() {
     if(!selectedNode)return;
     updateNodeConfig(selectedNode.id,key,value);
   };
-  const save=async()=>{
-    if(!project)return;
+  const save=async():Promise<boolean>=>{
+    if(!project)return false;
     setSaving(true);setError('');
     try{
       const valid=graphSchema.parse(graph);
       const newRevision=await window.znith.workflows.save(project.project.workflowId,valid,revision);
-      setRevision(newRevision);setDirty(false);setNotice(`Saved revision ${newRevision}`);
-    } catch(e){setError(String(e));} finally{setSaving(false);}
+      setRevision(newRevision);setDirty(false);setNotice(`Saved revision ${newRevision}`);return true;
+    } catch(e){setError(String(e));return false;} finally{setSaving(false);}
+  };
+  const backToWorkflows=async()=>{
+    if(dirty&&!await save())return;
+    window.history.pushState(null,'','/workflows');setView('management');setSelectedId(null);setInspectorOpen(false);
   };
   const start=async(nodeId?:string)=>{
     if(!project)return;
@@ -203,14 +241,14 @@ function AppContent() {
   return <div className="studio-app">
     <header className="studio-topbar">
       <div className="studio-brand"><span className="brand-mark">✦</span><b>ZNITH</b><span className="studio-brand-caption">AI WORKFLOW STUDIO</span></div>
-      <button className="workflow-title-button" onClick={()=>{if(dirty&&!window.confirm('Discard unsaved changes?'))return;window.history.pushState(null,'','/workflows');setView('management');}}>← <span>{project?.workflowName??'Workflow'}</span><small>{dirty?'● Chưa lưu':'● Đã lưu'}</small></button>
+      <button className="workflow-title-button" onClick={()=>void backToWorkflows()}>← <span>{project?.workflowName??'Workflow'}</span><small>{dirty?'● Chưa lưu':'● Đã lưu'}</small></button>
       <div className="studio-header-actions"><span className="node-count">⌘ {graph.nodes.length} nodes</span><span className={`run-state ${statusLabel.toLowerCase()}`}><i/>{statusLabel}</span><button className="studio-save" disabled={!dirty||saving} onClick={()=>void save()}>{saving?'Đang lưu…':dirty?'Lưu thay đổi':'Đã lưu'}</button><button className="studio-run" disabled={!project} onClick={()=>void start()}><span>▶</span> Sử dụng workflow</button></div>
     </header>
       <div className="studio-workspace">
       <div className="studio-left-rail">
         <button className="rail-add" title="Thêm node" onClick={()=>{setBranchFrom(null);setPickerFilter('');setPickerOpen(true);}}>＋</button>
-        <button title="Select" className="rail-active">↖</button>
-        <button title="Pan canvas" onClick={()=>setNotice('Kéo vùng trống để di chuyển canvas.')}>✋</button>
+        <button title="Select and move nodes" className={toolMode==='select'?'rail-active':''} onClick={()=>setToolMode('select')}>↖</button>
+        <button title="Pan canvas" className={toolMode==='pan'?'rail-active':''} onClick={()=>setToolMode('pan')}>✋</button>
         <span className="rail-divider"/>
         <button title="Thêm node ảnh/video" onClick={()=>{setPickerFilter('image');setBranchFrom(null);setPickerOpen(true);}}>▧</button>
         <button title="Thêm prompt" onClick={()=>addNode('film.story-input')}>T</button>
@@ -219,6 +257,8 @@ function AppContent() {
       <div className="studio-canvas">
         <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+          isValidConnection={connection=>connectionProblem(connection)===null}
+          nodesDraggable={toolMode==='select'} panOnDrag={toolMode==='pan'}
           onNodeClick={(_event,node)=>{setSelectedId(node.id);setInspectorOpen(false);}}
           onNodeDoubleClick={(_event,node)=>{setSelectedId(node.id);setInspectorOpen(true);}}
           onNodeContextMenu={(event,node)=>{event.preventDefault();setSelectedId(node.id);setInspectorOpen(true);}}
@@ -227,7 +267,7 @@ function AppContent() {
           fitView fitViewOptions={{padding:.18}} deleteKeyCode={['Backspace','Delete']} colorMode="dark" proOptions={{hideAttribution:true}}>
           <Background variant={BackgroundVariant.Dots} color="#303139" gap={22} size={1}/>
           <MiniMap zoomable pannable nodeColor="#9c80ed" maskColor="rgba(16,17,20,.78)" className="studio-minimap"/>
-          <CanvasFooter/>
+          <CanvasFooter selectedId={selectedId}/>
           <Panel position="top-left" className="canvas-account"><span>✦</span><b>Znith</b><small>LOCAL</small></Panel>
           {graph.nodes.length===0&&<Panel position="top-center" className="canvas-empty"><strong>Your canvas is empty</strong><span>Add a prompt or an action to start building a workflow.</span><button onClick={()=>{setPickerFilter('');setBranchFrom(null);setPickerOpen(true);}}>＋ Add your first node</button></Panel>}
           {run&&<Panel position="bottom-right" className={`canvas-run-banner ${run.status.toLowerCase()}`}><i/>{run.status} · {run.nodes.filter(n=>n.status==='SUCCEEDED').length}/{run.nodes.length} nodes{runId&&['RUNNING','READY','WAITING_APPROVAL'].includes(run.status)&&<button onClick={()=>void window.znith.runs.cancel(runId).catch(e=>setError(String(e)))}>Hủy</button>}</Panel>}

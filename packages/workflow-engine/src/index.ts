@@ -1,4 +1,4 @@
-import { graphSchema, type WorkflowGraph, type ValidationResult } from '@znith/contracts';
+import { graphSchema, type GraphEdge, type WorkflowGraph, type ValidationResult } from '@znith/contracts';
 import { NODE_REGISTRY } from '@znith/node-registry';
 
 export function dependencies(graph: WorkflowGraph, nodeId: string): string[] {
@@ -13,6 +13,29 @@ export function graphThroughNode(graph:WorkflowGraph,nodeId:string):WorkflowGrap
     for(const edge of graph.edges)if(included.has(edge.target)&&!included.has(edge.source)){included.add(edge.source);changed=true;}
   }
   return {...graph,nodes:graph.nodes.filter(node=>included.has(node.id)),edges:graph.edges.filter(edge=>included.has(edge.source)&&included.has(edge.target))};
+}
+export function updateGraphNodes(graph:WorkflowGraph,positions:ReadonlyMap<string,{x:number;y:number}>,removed:ReadonlySet<string>):WorkflowGraph {
+  return {
+    ...graph,
+    nodes:graph.nodes.filter(node=>!removed.has(node.id)).map(node=>{
+      const position=positions.get(node.id);
+      return position?{...node,position}:node;
+    }),
+    edges:graph.edges.filter(edge=>!removed.has(edge.source)&&!removed.has(edge.target)),
+  };
+}
+export function validateConnection(graph:WorkflowGraph,edge:Omit<GraphEdge,'id'>):string|null {
+  const source=graph.nodes.find(node=>node.id===edge.source),target=graph.nodes.find(node=>node.id===edge.target);
+  if(!source||!target)return 'Choose an existing source and target node';
+  if(source.id===target.id)return 'A node cannot connect to itself';
+  const output=NODE_REGISTRY.get(source.type)?.outputs.find(port=>port.id===edge.sourceHandle);
+  const input=NODE_REGISTRY.get(target.type)?.inputs.find(port=>port.id===edge.targetHandle);
+  if(!output||!input)return 'Connect an output port to an input port';
+  if(output.type!==input.type)return `These ports have different data types (${output.type} → ${input.type})`;
+  if(graph.edges.some(item=>item.source===edge.source&&item.sourceHandle===edge.sourceHandle&&item.target===edge.target&&item.targetHandle===edge.targetHandle))return 'These ports are already connected';
+  if(!input.multiple&&graph.edges.some(item=>item.target===edge.target&&item.targetHandle===edge.targetHandle))return `Input “${input.id}” accepts one connection`;
+  if(downstreamOf(graph,target.id).has(source.id))return 'This connection would create a cycle';
+  return null;
 }
 export function validateGraph(input: unknown): ValidationResult {
   const parsed = graphSchema.safeParse(input);
