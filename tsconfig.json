@@ -19,10 +19,18 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@payload-config": ["./src/payload.config.ts"]
+      "@payload-config": ["./src/payload.config.ts"],
+      "@znith/be": ["./be/src/index.ts"],
+      "@znith/be/collections": ["./be/src/collections/index.ts"],
+      "@znith/be/workflows": ["./be/src/modules/workflows/index.ts"],
+      "@znith/be/assets": ["./be/src/modules/assets/index.ts"],
+      "@znith/contracts": ["./packages/contracts/src/index.ts"],
+      "@znith/fe": ["./fe/src/index.ts"],
+      "@znith/fe/*": ["./fe/src/*"],
+      "@znith/utils": ["./packages/utils/src/index.ts"]
     },
     "target": "ES2022"
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
-  "exclude": ["node_modules", "vite.config.*"]
+  "exclude": ["node_modules", "**/node_modules", "**/dist", "vite.config.*"]
 }

@@ -77,24 +77,29 @@ You don't need to start it manually.
 
 ## Project Structure
 
-This project uses Next.js route groups to separate the frontend app from the
-Payload admin/API routes:
+This repository is a pnpm workspace with a root Figma Make/Next.js integration shell:
 
-- `src/app/(frontend)/` - Your application pages
-- `src/app/(payload)/` - Payload CMS admin panel and API routes (do not modify)
-- `src/collections/` - Payload data collection definitions
-- `src/globals/` - Payload CMS globals, if needed
-- `src/payload.config.ts` - Payload configuration
+- `fe/` - Frontend presentation components, route views, and styles
+- `be/` - Backend application services, domain ports, Payload adapters, providers, and collections
+- `packages/contracts/` - Shared workflow schemas, types, registry, provider catalog, and templates
+- `packages/utils/` - Framework-independent utilities shared across workspaces
+- `src/app/(frontend)/` - Thin Next.js page and API route adapters
+- `src/app/(payload)/` - Payload CMS admin panel and API routes (generated; do not modify)
+- `src/payload.config.ts` - Figma Payload config and collection registration
 - `src/payload-types.ts` - Auto-generated TypeScript types
 
 ## Key Files
 
-- `src/app/(frontend)/layout.tsx` - Root layout component
-- `src/app/(frontend)/page.tsx` - Home page component
-- `src/app/(frontend)/not-found.tsx` - Custom not-found page for missing routes/records
-- `src/app/(frontend)/styles.css` - Global styles and Tailwind CSS import
+- `fe/src/routes/FrontendLayout.tsx` - Frontend root layout and metadata
+- `fe/src/presentation/components/studio/` - Workflow, editor, and asset UI
+- `fe/src/styles.css` - Global styles and Tailwind CSS import
+- `src/app/(frontend)/` - Next.js route adapters
 - `src/lib/payload.ts` - Shared Payload utilities (findBySlug, findByField)
 - `src/payload.config.ts` - Payload config (collections, plugins, etc.)
+- `be/src/collections/` - Payload collection definitions
+- `be/src/modules/` - Backend application, domain, and infrastructure layers
+- `packages/contracts/src/` - Shared contracts and workflow definitions
+- `packages/utils/src/` - Shared pure utilities
 - `next.config.ts` - Next.js configuration (includes Payload wrapper)
 - `package.json` - Dependencies and scripts
 - `.mise.toml` - Toolchain versions (Node.js, pnpm)
@@ -104,7 +109,7 @@ Payload admin/API routes:
 
 This project uses **Tailwind CSS v4** for frontend styling. Tailwind and its
 PostCSS plugin are already installed and configured, and Tailwind is loaded by
-the `@import "tailwindcss"` directive in `src/app/(frontend)/styles.css`.
+the `@import "tailwindcss"` directive in `fe/src/styles.css`.
 
 Use Tailwind utility classes directly in JSX for application UI. Keep
 `styles.css` for the Tailwind import, shared theme tokens, and truly global base
@@ -251,12 +256,12 @@ bookings, messages, or similar app data.
 
 When adding Payload-backed functionality:
 
-1. Inspect the existing `src/payload.config.ts`, `src/collections/`, and
+1. Inspect the existing `src/payload.config.ts`, `be/src/collections/`, and
    frontend routes before changing code.
 2. Use the `payload-data-modeling` skill before adding or changing collections,
    globals, fields, relationships, constraints, ownership, access rules, seeds,
    or starter data.
-3. Add or update collection/global definitions under `src/collections/` or
+3. Add or update collection/global definitions under `be/src/collections/` or
    `src/globals/`.
 4. Register them in the existing `collections` or `globals` arrays in
    `src/payload.config.ts`. Keep the config shape intact. Keep the built-in
@@ -484,3 +489,13 @@ time. Batch by dependency layer — don't write files one at a time.
   `figma-image-loader.ts`. Pass Payload `media.url` to `next/image`. Do not
   add `images.remotePatterns` or a same-origin `/media/[id]` proxy, and do
   not replace the Figma loader.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

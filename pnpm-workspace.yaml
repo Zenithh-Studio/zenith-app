@@ -1,4 +1,9 @@
 # Keep host-native binaries for builds and Linux ARM64 binaries for Lambda.
+packages:
+  - 'fe'
+  - 'be'
+  - 'packages/*'
+
 supportedArchitectures:
   os:
     - current

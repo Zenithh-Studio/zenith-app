@@ -32,6 +32,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(dirname),
   },
   output: 'standalone',
+  transpilePackages: ['@znith/be', '@znith/contracts', '@znith/fe', '@znith/utils'],
   images: {
     loader: 'custom',
     loaderFile: './figma-image-loader.ts',
