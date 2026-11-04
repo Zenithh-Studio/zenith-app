@@ -98,7 +98,9 @@ export class ComfyUIClient {
   }
   async uploadImage(bytes: Uint8Array, filename: string, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
-    form.set('image', new Blob([new Uint8Array(bytes)], {type:'image/png'}), filename.replace(/[^a-zA-Z0-9_.-]/g,'_'));
+    const extension=filename.split('.').at(-1)?.toLowerCase()??'png';
+    const mime=({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp'} as Record<string,string>)[extension]??'image/png';
+    form.set('image', new Blob([new Uint8Array(bytes)], {type:mime}), filename.replace(/[^a-zA-Z0-9_.-]/g,'_'));
     form.set('overwrite', 'false');
     const data = await requestJson(this.baseURL + '/upload/image', {method:'POST',body:form,signal});
     if (typeof data.name !== 'string') throw new Error('ComfyUI image upload returned no filename');

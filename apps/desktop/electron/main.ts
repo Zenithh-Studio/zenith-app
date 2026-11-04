@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
-import { join, resolve } from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { extname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -36,6 +36,10 @@ async function createWindow():Promise<void> {
   else await mainWindow.loadFile(join(__dirname,'../dist/index.html'));
 }
 function registerIPC():void {
+  ipcMain.handle('files:pick-image',async()=>{
+    const result=await dialog.showOpenDialog(mainWindow!,{title:'Choose a reference image',properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});
+    return result.canceled?null:result.filePaths[0]??null;
+  });
   ipcMain.handle('projects:list',()=>database.listProjects());
   ipcMain.handle('projects:create',(_e,name:unknown)=>database.createProject(projectNameSchema.parse(name)));
   ipcMain.handle('projects:open',(_e,id:unknown)=>database.openProject(idSchema.parse(id)));
@@ -70,6 +74,20 @@ function registerIPC():void {
     const content=await readFile(absolute);
     if(content.byteLength>2*1024*1024) throw new Error('Preview is limited to 2 MiB');
     return content.toString('utf8');
+  });
+  ipcMain.handle('artifacts:preview',async(_e,id:unknown)=>{
+    const row=database.findArtifact(idSchema.parse(id));
+    if(!row || !['image','video','audio','film'].includes(row.type))throw new Error('Media artifact missing');
+    const project=database.listProjects().find(p=>p.id===row.projectId);
+    if(!project)throw new Error('Project missing');
+    const absolute=secureArtifactPath(project.rootPath,row.relativePath);
+    const content=await readFile(absolute);
+    if(content.byteLength>8*1024*1024)throw new Error('Inline preview is limited to 8 MiB');
+    const ext=extname(row.relativePath).toLowerCase();
+    const mimeTypes:Record<string,string>={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.webm':'video/webm','.wav':'audio/wav','.mp3':'audio/mpeg','.m4a':'audio/mp4'};
+    const mimeType=mimeTypes[ext];
+    if(!mimeType)throw new Error('Unsupported media preview format');
+    return {mimeType,dataUrl:`data:${mimeType};base64,${content.toString('base64')}`};
   });
 }
 app.whenReady().then(async()=>{

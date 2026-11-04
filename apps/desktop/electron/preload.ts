@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ZnithAPI, RunEvent, WorkflowGraph } from '@znith/contracts';
 const bridge:ZnithAPI={
+  files:{pickImage:()=>ipcRenderer.invoke('files:pick-image')},
   projects:{
     list:()=>ipcRenderer.invoke('projects:list'),
     create:(name:string)=>ipcRenderer.invoke('projects:create',name),
@@ -31,6 +32,6 @@ const bridge:ZnithAPI={
       return ()=>ipcRenderer.removeListener('runs:event',listener);
     },
   },
-  artifacts:{readText:(id:string)=>ipcRenderer.invoke('artifacts:read-text',id),reveal:(id:string)=>ipcRenderer.invoke('artifacts:reveal',id)},
+  artifacts:{readText:(id:string)=>ipcRenderer.invoke('artifacts:read-text',id),preview:(id:string)=>ipcRenderer.invoke('artifacts:preview',id),reveal:(id:string)=>ipcRenderer.invoke('artifacts:reveal',id)},
 };
 contextBridge.exposeInMainWorld('znith',bridge);

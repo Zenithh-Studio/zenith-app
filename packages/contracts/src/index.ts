@@ -55,6 +55,7 @@ export interface ArtifactRef {
   checksum: string;
   metadata: Record<string, unknown>;
 }
+export interface MediaPreview { dataUrl: string; mimeType: string }
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -102,6 +103,7 @@ export interface RunEvent {
   timestamp: number;
 }
 export interface ZnithAPI {
+  files: { pickImage():Promise<string|null> };
   projects: {
     list(): Promise<ProjectSummary[]>;
     create(name: string): Promise<ProjectData>;
@@ -126,5 +128,5 @@ export interface ZnithAPI {
     approveNode(id: string, approved: boolean): Promise<void>;
     subscribe(id: string, callback: (event: RunEvent) => void): () => void;
   };
-  artifacts: { readText(id: string): Promise<string>; reveal(id:string): Promise<void> };
+  artifacts: { readText(id: string): Promise<string>; preview(id:string):Promise<MediaPreview>; reveal(id:string): Promise<void> };
 }
