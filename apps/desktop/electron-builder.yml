@@ -1,0 +1,18 @@
+appId: studio.znith.desktop
+productName: Znith
+asar: true
+asarUnpack:
+  - "**/*.node"
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - node_modules/**
+directories:
+  output: release
+win:
+  target: nsis
+linux:
+  target: AppImage
+mac:
+  target: dmg
