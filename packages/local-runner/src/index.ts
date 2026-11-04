@@ -8,7 +8,7 @@ import type { ZnithDatabase } from '@znith/database';
 import { NODE_REGISTRY } from '@znith/node-registry';
 import { OllamaClient, OpenAICompatibleClient } from '@znith/providers';
 import { skillForNode, validateSkillOutput } from '@znith/skill-runtime';
-import { collectClipManifest, exportLocalFilm, runComfyMedia } from './media';
+import { collectClipManifest, exportLocalFilm, runComfyMedia, runPiperAudio } from './media';
 export { collectClipManifest } from './media';
 
 const PAUSE_MS = 180;
@@ -192,9 +192,10 @@ export class LocalScheduler extends EventEmitter {
       }
       const mode=String(node.config.executionMode??'mock');
       if ((mode==='comfyui' && ['media.image-generate','media.video-generate'].includes(node.type)) ||
-          (mode==='ffmpeg' && node.type==='media.film-export')) {
+          (mode==='ffmpeg' && node.type==='media.film-export') ||
+          (mode==='piper' && node.type==='media.audio-generate')) {
         const mediaContext={node,inputs:inputByPort,runId,projectRoot:project.rootPath,signal};
-        const results=mode==='comfyui' ? await runComfyMedia(mediaContext) : [await exportLocalFilm(mediaContext)];
+        const results=mode==='comfyui' ? await runComfyMedia(mediaContext) : mode==='piper' ? [await runPiperAudio(mediaContext)] : [await exportLocalFilm(mediaContext)];
         if(signal.aborted || this.db.getRun(runId).status==='CANCELLED') {
           this.db.updateNode(nodeRunId,{status:'CANCELLED',error:'Cancelled'});
           return;
