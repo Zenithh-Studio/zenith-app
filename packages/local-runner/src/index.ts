@@ -9,6 +9,7 @@ import { NODE_REGISTRY } from '@znith/node-registry';
 import { OllamaClient, OpenAICompatibleClient } from '@znith/providers';
 import { skillForNode, validateSkillOutput } from '@znith/skill-runtime';
 import { collectClipManifest, exportLocalFilm, runComfyMedia } from './media';
+export { collectClipManifest } from './media';
 
 const PAUSE_MS = 180;
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((res, rej)=>{
