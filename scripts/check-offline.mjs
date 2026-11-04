@@ -35,7 +35,7 @@ for(const file of files){
 }
 const registry=readFileSync(join(root,'packages/node-registry/src/index.ts'),'utf8');
 const count=(registry.match(/make\('(film\.|logic\.|media\.)/g)||[]).length;
-assert.equal(count,12,'Expected exactly 12 node definitions');
+assert.equal(count,13,'Expected exactly 13 node definitions');
 const runnerFile=join(root,'packages/local-runner/src/index.ts');
 const runnerSource=ts.createSourceFile(runnerFile,readFileSync(runnerFile,'utf8'),ts.ScriptTarget.Latest,true);
 const fn=runnerSource.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='mockNode');
@@ -50,5 +50,5 @@ const script=mockNode({type:'film.script',config:{}},{story});
 assert.equal(script.scenes.length,2);
 const board=mockNode({type:'film.storyboard',config:{}},{script});
 assert.equal(board.shots.length,5);
-console.log(`PASS: ${parsed} TypeScript/TSX files parsed; JSON files valid; 12 nodes present; mock story/script/storyboard outputs verified.`);
+console.log(`PASS: ${parsed} TypeScript/TSX files parsed; JSON files valid; 13 nodes present; mock story/script/storyboard outputs verified.`);
 console.log('NOTE: This check is not a dependency installation, typecheck, Electron startup, or package build.');
