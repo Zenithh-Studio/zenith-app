@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap, Panel,
+  ReactFlow, Background, Controls, MiniMap, Panel, useNodesInitialized, useReactFlow,
   applyNodeChanges, applyEdgeChanges, addEdge,
   type Node, type Edge, type Connection, type NodeChange, type EdgeChange
 } from '@xyflow/react';
@@ -13,6 +13,20 @@ const nodeTypes={znith:FlowNode};
 const emptyGraph:WorkflowGraph={schemaVersion:2,nodes:[],edges:[]};
 const CATEGORY_ORDER=['input','skill','logic','media'] as const;
 const CATEGORY_LABEL:Record<string,string>={input:'INPUT',skill:'AI SKILLS',logic:'LOGIC',media:'MEDIA'};
+
+/** Fit the persisted graph after React Flow measures asynchronously loaded nodes. */
+function FitLoadedGraph({ projectId, nodeCount }: { projectId: string; nodeCount: number }) {
+  const initialized = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  const fittedProject = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialized || nodeCount === 0 || fittedProject.current === projectId) return;
+    fittedProject.current = projectId;
+    const timeout = setTimeout(() => { void fitView({ padding: 0.25, duration: 250 }); }, 50);
+    return () => clearTimeout(timeout);
+  }, [initialized, nodeCount, projectId, fitView]);
+  return null;
+}
 
 export default function App() {
   const [projects,setProjects]=useState<ProjectSummary[]>([]);
@@ -179,6 +193,7 @@ export default function App() {
             onPaneClick={()=>setSelectedId(null)} fitView fitViewOptions={{padding:0.25}}
             onInit={instance=>{requestAnimationFrame(()=>instance.fitView({padding:0.25,duration:250}));}}
             deleteKeyCode={['Backspace','Delete']} colorMode="dark" proOptions={{hideAttribution:true}}>
+            <FitLoadedGraph projectId={project?.project.id??'loading'} nodeCount={flowNodes.length} />
             <Background color="#2b3044" gap={24} size={1} />
             <Controls showInteractive={false}/>
             <MiniMap zoomable pannable nodeColor="#7e66c4" maskColor="rgba(12,14,23,.7)" />
