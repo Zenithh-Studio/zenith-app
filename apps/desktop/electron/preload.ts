@@ -24,6 +24,6 @@ const bridge:ZnithAPI={
       return ()=>ipcRenderer.removeListener('runs:event',listener);
     },
   },
-  artifacts:{readText:(id:string)=>ipcRenderer.invoke('artifacts:read-text',id)},
+  artifacts:{readText:(id:string)=>ipcRenderer.invoke('artifacts:read-text',id),reveal:(id:string)=>ipcRenderer.invoke('artifacts:reveal',id)},
 };
 contextBridge.exposeInMainWorld('znith',bridge);
