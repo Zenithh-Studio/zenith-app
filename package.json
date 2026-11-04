@@ -9,7 +9,11 @@
     "typecheck": "pnpm --filter @znith/desktop typecheck",
     "test": "pnpm --filter @znith/desktop test",
     "check:offline": "node scripts/check-offline.mjs",
-    "package:dir": "pnpm --filter @znith/desktop package:dir"
+    "package:dir": "pnpm --filter @znith/desktop package:dir",
+    "package:win": "pnpm --filter @znith/desktop package:win",
+    "package:linux": "pnpm --filter @znith/desktop package:linux"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

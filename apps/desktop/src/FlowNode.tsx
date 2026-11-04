@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { NODE_REGISTRY } from '@znith/node-registry';
 import type { RunStatus } from '@znith/contracts';
@@ -11,7 +11,7 @@ function FlowNode(props:NodeProps) {
   const definition=NODE_REGISTRY.get(data.nodeType);
   if(!definition) return <div className="flow-node invalid">Unknown: {data.nodeType}</div>;
   const tint=colors[definition.category];
-  return <div className={`flow-node ${props.selected?'selected':''}`} style={{'--node-tint':tint} as React.CSSProperties}>
+  return <div className={`flow-node ${props.selected?'selected':''}`} style={{'--node-tint':tint} as CSSProperties}>
     <div className="node-topline" />
     <div className="node-header">
       <span className="node-category">{definition.category}</span>
