@@ -18,7 +18,7 @@ const bridge:ZnithAPI={
     validate:(graph:WorkflowGraph)=>ipcRenderer.invoke('workflows:validate',graph),
   },
   runs:{
-    start:(workflowId:string)=>ipcRenderer.invoke('runs:start',workflowId),
+    start:(workflowId:string,nodeId?:string)=>ipcRenderer.invoke('runs:start',workflowId,nodeId),
     latest:(workflowId:string)=>ipcRenderer.invoke('runs:latest',workflowId),
     get:(id:string)=>ipcRenderer.invoke('runs:get',id),
     cancel:(id:string)=>ipcRenderer.invoke('runs:cancel',id),
