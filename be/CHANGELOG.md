@@ -1,5 +1,13 @@
 # @znith/be
 
+## 0.2.1
+
+### Patch Changes
+
+- ccc1538: Changed: Removed the duplicated root source paths after moving their modules into the frontend, backend, and contracts workspaces.
+- Updated dependencies [ccc1538]
+  - @znith/contracts@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
