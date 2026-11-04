@@ -32,7 +32,7 @@ export default function App() {
     try {
       const data=await window.znith.projects.open(id);
       setProject(data);setGraph(data.graph);setRevision(data.revision);setRun(null);
-      setRunId(null);setArtifactText('');setSelectedId(null);setDirty(false);setError('');
+      setRunId(await window.znith.runs.latest(data.project.workflowId));setArtifactText('');setSelectedId(null);setDirty(false);setError('');
     } catch(e) {setError(String(e));}
   },[]);
   useEffect(()=>{
