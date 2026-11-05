@@ -1,0 +1,54 @@
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-znith}
+      POSTGRES_USER: ${POSTGRES_USER:-znith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-znith-local-postgres}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-55432}:5432'
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-znith} -d ${POSTGRES_DB:-znith}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        SITE_URL: ${SITE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://znith:znith-local-postgres@database:5432/znith}
+      PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
+      NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3000}
+    ports:
+      - '${APP_PORT:-3001}:3000'
+    volumes:
+      - payload-uploads:/app/uploads
+      - payload-secrets:/app/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/studio/workflows').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+volumes:
+  database-data:
+  payload-uploads:
+  payload-secrets:
