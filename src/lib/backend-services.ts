@@ -2,6 +2,7 @@ import {
   AssetService,
   PayloadAssetRepository,
   PayloadWorkflowRepository,
+  WorkflowMediaPersister,
   WorkflowService,
   runWorkflow,
 } from '@znith/be'
@@ -12,7 +13,14 @@ import { getPayloadClient } from './payload'
 export async function getWorkflowService() {
   const payloadClient = await getPayloadClient()
   const repository = new PayloadWorkflowRepository(payloadClient as unknown as PayloadLocalApi)
-  return new WorkflowService(repository, runWorkflow)
+  const mediaRepository = new PayloadAssetRepository(payloadClient as unknown as PayloadMediaApi)
+  const assetService = new AssetService(mediaRepository)
+  return new WorkflowService(
+    repository,
+    runWorkflow,
+    undefined,
+    new WorkflowMediaPersister(assetService),
+  )
 }
 
 export async function getAssetService() {

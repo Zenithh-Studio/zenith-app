@@ -14,7 +14,8 @@ import type {
   WorkflowDocument,
   WorkflowStatus,
 } from '@znith/contracts'
-import type { EngineResult } from './workflow-service.types'
+import type { EngineResult, WorkflowRunOptions } from './workflow-service.types'
+import type { WorkflowMediaPersister } from './workflow-media-persister'
 import type {
   ExecutionCreateRecord,
   WorkflowCreateRecord,
@@ -22,7 +23,11 @@ import type {
 } from '../domain/workflow-repository'
 
 export interface WorkflowRunner {
-  (definition: WorkflowDefinition, targetNodeId?: string): Promise<EngineResult>
+  (
+    definition: WorkflowDefinition,
+    targetNodeId?: string,
+    options?: WorkflowRunOptions,
+  ): Promise<EngineResult>
 }
 
 export interface WorkflowRunResponse extends EngineResult {
@@ -34,6 +39,7 @@ export class WorkflowService {
     private readonly repository: WorkflowRepository,
     private readonly runWorkflow: WorkflowRunner,
     private readonly now: () => Date = () => new Date(),
+    private readonly mediaPersister?: WorkflowMediaPersister,
   ) {}
 
   async listWorkflows(search?: string) {
@@ -97,7 +103,29 @@ export class WorkflowService {
     const execution = await this.repository.createExecution(executionInput)
     await this.repository.updateWorkflowRunState(id, 'running', startedAt.toISOString())
 
-    const runResult = await this.runWorkflow(snapshot, validatedInput.targetNodeId)
+    const nodeRecordsById = new Map<string, NodeExecutionRecord>()
+    let nodeRecordWrites = Promise.resolve()
+    const onNodeRecord = async (record: NodeExecutionRecord) => {
+      nodeRecordsById.set(record.nodeId, cloneValue(record))
+      const nodeRecords = [...nodeRecordsById.values()].map((nodeRecord) => cloneValue(nodeRecord))
+      nodeRecordWrites = nodeRecordWrites
+        .then(async () => {
+          await this.repository.updateExecution(execution.id, { nodeRecords })
+        })
+        .catch(() => undefined)
+      await nodeRecordWrites
+    }
+
+    const runResult = await this.runWorkflow(snapshot, validatedInput.targetNodeId, {
+      ...(this.mediaPersister
+        ? {
+            persistNodeOutputs: (node, outputs) =>
+              this.mediaPersister!.persist(id, execution.id, node, outputs),
+          }
+        : {}),
+      onNodeRecord,
+    })
+    await nodeRecordWrites
     const completedAt = this.now()
     const nodeRecords: NodeExecutionRecord[] = runResult.records
     await this.repository.updateExecution(execution.id, {

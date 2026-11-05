@@ -12,6 +12,7 @@ import type {
   WorkflowNode,
   WorkflowRunResult,
 } from '@znith/contracts'
+import type { WorkflowRunOptions } from '../application/workflow-service.types'
 
 export { workflowDefinitionSchema } from '@znith/contracts'
 
@@ -104,10 +105,21 @@ const mediaURL = (value: unknown) =>
 const absoluteMediaURL = (value: unknown) => {
   const url = mediaURL(value)
   if (!url) return ''
-  return new URL(
-    url,
-    process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://127.0.0.1:3000',
-  ).toString()
+  const baseURL =
+    process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://127.0.0.1:3000'
+  const resolved = new URL(url, baseURL)
+  const site = new URL(baseURL)
+
+  if (
+    resolved.origin === site.origin &&
+    ['localhost', '127.0.0.1'].includes(site.hostname) &&
+    site.port !== (process.env.PORT || '3000')
+  ) {
+    resolved.hostname = '127.0.0.1'
+    resolved.port = process.env.PORT || '3000'
+  }
+
+  return resolved.toString()
 }
 
 function requireSecret(
@@ -983,7 +995,7 @@ async function executeNode(
 export async function runWorkflow(
   definition: WorkflowDefinition,
   targetNodeId?: string,
-  options: { concurrency?: number } = {},
+  options: WorkflowRunOptions = {},
 ): Promise<EngineResult> {
   const records: NodeExecutionRecord[] = []
   const logs: EngineResult['logs'] = []
@@ -994,6 +1006,18 @@ export async function runWorkflow(
     const pending = new Map(sorted.map((node) => [node.id, node]))
     const finished = new Map<string, NodeExecutionRecord>()
     const concurrency = clampNumber(options.concurrency ?? 4, 1, 16)
+    const persistRecord = async (record: NodeExecutionRecord) => {
+      try {
+        await options.onNodeRecord?.(record)
+      } catch {
+        logs.push({
+          at: new Date().toISOString(),
+          level: 'error',
+          nodeId: record.nodeId,
+          message: 'Could not persist execution progress for this node.',
+        })
+      }
+    }
 
     const executeOne = async (node: WorkflowNode) => {
       const startedAt = new Date()
@@ -1011,24 +1035,17 @@ export async function runWorkflow(
       })
       const retryCount = clampNumber(Number(node.config.retryCount) || 0, 0, 5)
       const timeoutMs = clampNumber(Number(node.config.timeoutMs) || 120_000, 100, 300_000)
+      let result: Record<string, NodeValue> | undefined
+      let failureMessage: string | undefined
+      let successfulAttempt = 0
       for (let attempt = 0; attempt <= retryCount; attempt += 1) {
         try {
-          const result = await withTimeout(
+          result = await withTimeout(
             executeNode(node, resolveInputs(node, definition.edges, outputs)),
             timeoutMs,
           )
-          outputs.set(node.id, result)
-          record.outputs = result
-          record.status = 'succeeded'
-          record.completedAt = new Date().toISOString()
-          record.durationMs = Date.now() - startedAt.getTime()
-          logs.push({
-            at: record.completedAt,
-            level: 'info',
-            nodeId: node.id,
-            message: `${node.name} completed${attempt ? ` after ${attempt + 1} attempts` : ''}`,
-          })
-          return record
+          successfulAttempt = attempt
+          break
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Node execution failed.'
           if (attempt < retryCount) {
@@ -1042,13 +1059,53 @@ export async function runWorkflow(
             await new Promise((resolve) => setTimeout(resolve, delay))
             continue
           }
-          record.status = 'failed'
-          record.completedAt = new Date().toISOString()
-          record.durationMs = Date.now() - startedAt.getTime()
-          record.error = message
-          return record
+          failureMessage = message
         }
       }
+
+      if (!result) {
+        record.status = 'failed'
+        record.completedAt = new Date().toISOString()
+        record.durationMs = Date.now() - startedAt.getTime()
+        record.error = failureMessage || 'Node execution failed.'
+        await persistRecord(record)
+        return record
+      }
+
+      if (options.persistNodeOutputs) {
+        try {
+          const persistence = await options.persistNodeOutputs(node, result)
+          result = persistence.outputs
+          for (const warning of persistence.warnings ?? []) {
+            logs.push({
+              at: new Date().toISOString(),
+              level: 'info',
+              nodeId: node.id,
+              message: `Output save warning: ${warning}`,
+            })
+          }
+        } catch {
+          logs.push({
+            at: new Date().toISOString(),
+            level: 'info',
+            nodeId: node.id,
+            message: 'Output save warning: the generated result remains in execution history.',
+          })
+        }
+      }
+
+      outputs.set(node.id, result)
+      record.outputs = result
+      record.status = 'succeeded'
+      record.completedAt = new Date().toISOString()
+      record.durationMs = Date.now() - startedAt.getTime()
+      logs.push({
+        at: record.completedAt,
+        level: 'info',
+        nodeId: node.id,
+        message: `${node.name} completed${successfulAttempt ? ` after ${successfulAttempt + 1} attempts` : ''}`,
+      })
+      await persistRecord(record)
       return record
     }
 
@@ -1077,6 +1134,7 @@ export async function runWorkflow(
                 error: 'Skipped because an upstream dependency did not succeed.',
               }
               records.push(record)
+              await persistRecord(record)
               finished.set(node.id, record)
               return
             }
