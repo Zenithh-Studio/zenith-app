@@ -220,14 +220,23 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const tone = categoryTone[definition?.category ?? 'Utility']
   const Icon = iconByType[data.workflowNode.type] ?? Zap
   const record = data.record
-  const preview = record?.outputs ? Object.values(record.outputs)[0]?.value : undefined
+  const output = record?.outputs ? Object.values(record.outputs)[0] : undefined
+  const preview = output?.value
   const previewObject =
     preview && typeof preview === 'object' ? (preview as Record<string, unknown>) : null
   const mediaType = definition?.outputs.find(
     (port) => port.dataType === 'image' || port.dataType === 'video',
   )?.dataType
-  const mediaAssetId = previewObject?.assetId ?? data.workflowNode.config.assetId
-  const mediaFileName = previewObject?.filename ?? data.workflowNode.config.fileName
+  const mediaAssetId =
+    output?.assetId ??
+    output?.metadata?.assetId ??
+    previewObject?.assetId ??
+    data.workflowNode.config.assetId
+  const mediaFileName =
+    output?.metadata?.filename ??
+    output?.metadata?.fileName ??
+    previewObject?.filename ??
+    data.workflowNode.config.fileName
   const mediaValue = mediaSource(
     previewObject?.url ?? (typeof preview === 'string' ? preview : data.workflowNode.config.url),
     mediaAssetId,
@@ -291,9 +300,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
           style={{ aspectRatio: mediaRatio }}
         >
-          {record?.error ? (
-            <div className="p-5 text-center text-xs text-rose-600">{record.error}</div>
-          ) : mediaValue ? (
+          {mediaValue ? (
             mediaType === 'video' ? (
               <video src={mediaValue} controls className="size-full object-contain" />
             ) : mediaAssetId ? (
@@ -332,12 +339,24 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
                 }}
               />
             )
+          ) : record?.error ? (
+            <div className="p-5 text-center text-xs text-rose-600">{record.error}</div>
           ) : mediaType === 'video' ? (
             <Video size={38} className="text-zinc-300" />
           ) : (
             <ImageIcon size={38} className="text-zinc-300" />
           )}
         </div>
+        {record?.error && mediaValue ? (
+          <p className="mt-1.5 px-1 text-[10px] text-rose-600" title={record.error}>
+            Latest run failed; showing the previous output.
+          </p>
+        ) : null}
+        {typeof output?.metadata?.saveWarning === 'string' ? (
+          <p className="mt-1.5 px-1 text-[10px] text-amber-700" title={output.metadata.saveWarning}>
+            Could not save this output to Assets. Its provider URL may expire.
+          </p>
+        ) : null}
         <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-500">
           <span>@{slug}</span>
           <span>{mediaRatioLabel}</span>
@@ -501,6 +520,60 @@ function toFlowNodes(
   }))
 }
 
+function mergeExecutionNodeRecords(executions: ExecutionDocument[]) {
+  const latestRecords = new Map<string, NodeExecutionRecord>()
+  const latestSuccessfulOutputs = new Map<string, NonNullable<NodeExecutionRecord['outputs']>>()
+
+  for (const execution of executions) {
+    for (const record of execution.nodeRecords ?? []) {
+      if (!latestRecords.has(record.nodeId)) latestRecords.set(record.nodeId, record)
+      if (
+        record.status === 'succeeded' &&
+        record.outputs &&
+        !latestSuccessfulOutputs.has(record.nodeId)
+      ) {
+        latestSuccessfulOutputs.set(record.nodeId, record.outputs)
+      }
+    }
+  }
+
+  return [...latestRecords.values()].map((record) => {
+    const previousOutputs = latestSuccessfulOutputs.get(record.nodeId)
+    return previousOutputs ? { ...record, outputs: previousOutputs } : record
+  })
+}
+
+function runScopeNodeIds(definition: WorkflowDefinition, targetNodeId?: string) {
+  if (!targetNodeId) return new Set(definition.nodes.map((node) => node.id))
+
+  const included = new Set([targetNodeId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const edge of definition.edges) {
+      if (included.has(edge.target) && !included.has(edge.source)) {
+        included.add(edge.source)
+        changed = true
+      }
+    }
+  }
+  return included
+}
+
+function hasGeneratedMediaOutput(node: StudioNode) {
+  if (
+    !['ai.generate-image', 'ai.edit-image', 'ai.generate-video', 'ai.image-to-video'].includes(
+      node.data.workflowNode.type,
+    )
+  ) {
+    return false
+  }
+
+  return Object.values(node.data.record?.outputs ?? {}).some(
+    (output) => output.type === 'image' || output.type === 'video',
+  )
+}
+
 function portColor(dataType?: string) {
   if (dataType === 'image') return '#3b82f6'
   if (dataType === 'video') return '#d946ef'
@@ -556,6 +629,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [running, setRunning] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
+  const [runConfirmation, setRunConfirmation] = useState<{
+    targetNodeId?: string
+    previousMediaCount: number
+  } | null>(null)
   const [nodePickerOpen, setNodePickerOpen] = useState(false)
   const [pickerSearch, setPickerSearch] = useState('')
   const [pickerPosition, setPickerPosition] = useState<{ x: number; y: number } | null>(null)
@@ -574,8 +651,12 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     if (!response.ok) return setError(responseBody.error || 'Could not load workflow.')
     setWorkflow(responseBody.workflow)
     setExecutions(responseBody.executions)
-    const latestNodeRecords = responseBody.executions[0]?.nodeRecords ?? []
-    setNodes(toFlowNodes(responseBody.workflow.definition, latestNodeRecords))
+    setNodes(
+      toFlowNodes(
+        responseBody.workflow.definition,
+        mergeExecutionNodeRecords(responseBody.executions),
+      ),
+    )
     setEdges(toFlowEdges(responseBody.workflow.definition))
     undoStack.current = []
     redoStack.current = []
@@ -655,32 +736,74 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     return true
   }, [definitionFromState, workflow, workflowId])
 
-  const run = async (targetNodeId?: string) => {
+  const executeRun = async (targetNodeId?: string) => {
     if (!(await save())) return
     setRunning(true)
     setError('')
+    const scopeNodeIds = runScopeNodeIds(definitionFromState(), targetNodeId)
     setNodes((current) =>
       current.map((node) => ({
         ...node,
-        data: { ...node.data, record: { nodeId: node.id, status: 'queued' } },
+        data: scopeNodeIds.has(node.id)
+          ? {
+              ...node.data,
+              record: {
+                ...node.data.record,
+                nodeId: node.id,
+                status: 'queued',
+                error: undefined,
+              },
+            }
+          : node.data,
       })),
     )
-    const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetNodeId }),
-    })
-    const responseBody = await response.json()
-    setRunning(false)
-    const records: NodeExecutionRecord[] = responseBody.records ?? []
-    setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: { ...node.data, record: records.find((record) => record.nodeId === node.id) },
-      })),
-    )
-    if (!response.ok) setError(responseBody.error || 'Execution failed.')
-    await load()
+    try {
+      const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetNodeId }),
+      })
+      const responseBody = await response.json()
+      const records: NodeExecutionRecord[] = responseBody.records ?? []
+      setNodes((current) =>
+        current.map((node) => {
+          const nextRecord = records.find((record) => record.nodeId === node.id)
+          if (!nextRecord) return node
+          const previousOutputs = node.data.record?.outputs
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              record: {
+                ...nextRecord,
+                outputs: nextRecord.outputs ?? previousOutputs,
+              },
+            },
+          }
+        }),
+      )
+      if (!response.ok) setError(responseBody.error || 'Execution failed.')
+      await load()
+    } catch {
+      setError('Could not finish workflow execution. Refresh to see its saved outputs.')
+      await load()
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const run = async (targetNodeId?: string) => {
+    if (running) return
+    const definition = definitionFromState()
+    const scopeNodeIds = runScopeNodeIds(definition, targetNodeId)
+    const previousMediaCount = nodes.filter(
+      (node) => scopeNodeIds.has(node.id) && hasGeneratedMediaOutput(node),
+    ).length
+    if (previousMediaCount) {
+      setRunConfirmation({ targetNodeId, previousMediaCount })
+      return
+    }
+    await executeRun(targetNodeId)
   }
 
   const selectedNode = nodes.find((node) => node.id === selectedId)
@@ -1192,6 +1315,52 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           </button>
         </div>
       )}
+
+      {runConfirmation ? (
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-zinc-950/35 p-4 backdrop-blur-[2px]">
+          <section
+            aria-labelledby="workflow-rerun-title"
+            aria-modal="true"
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl"
+            role="alertdialog"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600">
+                <RefreshCw size={18} />
+              </span>
+              <div>
+                <h2 id="workflow-rerun-title" className="text-sm font-semibold text-zinc-900">
+                  Generate a new version?
+                </h2>
+                <p className="mt-1.5 text-xs leading-relaxed text-zinc-600">
+                  {runConfirmation.previousMediaCount} node
+                  {runConfirmation.previousMediaCount === 1 ? ' already has' : 's already have'} a
+                  generated image or video. This run will create another version. Previous results
+                  stay in execution history, and new media is saved separately in Assets.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setRunConfirmation(null)}
+                className="h-9 rounded-xl border border-zinc-200 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const targetNodeId = runConfirmation.targetNodeId
+                  setRunConfirmation(null)
+                  void executeRun(targetNodeId)
+                }}
+                className="h-9 rounded-xl bg-violet-600 px-3.5 text-xs font-semibold text-white hover:bg-violet-700"
+              >
+                Generate new version
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         {paletteOpen ? (
