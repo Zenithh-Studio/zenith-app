@@ -61,6 +61,7 @@ Set `DATABASE_URL` and `PAYLOAD_SECRET` in `.env` first, and make sure PostgreSQ
 - Persist execution snapshots, node outputs, status, logs, and errors in Payload.
 - Upload and reuse media from the Payload Media collection.
 - Configure provider credentials with server-only environment variables such as `APP_OPENAI_API_KEY`.
+- Image generation can use ChatGPT2API through `APP_CHATGPT2API_BASE_URL` and `APP_CHATGPT2API_API_KEY` in `.env`.
 
 Image and video generation requires a compatible provider and model configuration. Output nodes currently preserve the provider's output reference and filename metadata; persistent media ingestion is a separate storage capability.
 
