@@ -18,7 +18,7 @@ RUN pnpm install --frozen-lockfile
 FROM dependencies AS builder
 
 COPY . .
-ARG SITE_URL=http://localhost:3000
+ARG SITE_URL=http://localhost:3001
 ENV SITE_URL=$SITE_URL
 ENV NEXT_PUBLIC_SITE_URL=$SITE_URL
 RUN PAYLOAD_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")" \
