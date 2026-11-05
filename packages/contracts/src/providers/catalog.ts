@@ -1,5 +1,12 @@
 export type ProviderId =
-  'openai' | 'chatgpt2api' | 'anthropic' | 'gemini' | 'replicate' | 'comfyui' | 'custom-http'
+  | 'openai'
+  | 'chatgpt2api'
+  | 'muse2api'
+  | 'anthropic'
+  | 'gemini'
+  | 'replicate'
+  | 'comfyui'
+  | 'custom-http'
 
 export type ProviderModality = 'text' | 'vision' | 'image' | 'video'
 
@@ -29,6 +36,13 @@ export const providerCatalog: ProviderInfo[] = [
     modalities: ['image'],
     models: { image: ['gpt-image-2', 'codex-gpt-image-2', 'auto'] },
     credential: 'APP_CHATGPT2API_API_KEY',
+  },
+  {
+    id: 'muse2api',
+    name: 'Muse2API',
+    modalities: ['video'],
+    models: { video: ['muse-video'] },
+    credential: 'APP_MUSE2API_API_KEY',
   },
   {
     id: 'anthropic',
