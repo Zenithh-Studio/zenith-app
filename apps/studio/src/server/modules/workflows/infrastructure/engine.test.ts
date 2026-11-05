@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('server-only', () => ({}))
 
@@ -49,6 +49,92 @@ const executableDefinition: WorkflowDefinition = {
   ],
 }
 
+function muse2APIDefinition({
+  images = [],
+  videos = [],
+  config = {},
+}: {
+  images?: string[]
+  videos?: string[]
+  config?: Record<string, unknown>
+} = {}): WorkflowDefinition {
+  return {
+    version: 1,
+    nodes: [
+      ...images.map((url, index) => ({
+        id: `image-${index}`,
+        type: 'input.image',
+        name: `Frame ${index + 1}`,
+        position: { x: 0, y: index * 100 },
+        config: { url, assetId: `asset-${index + 1}`, mimeType: 'image/png' },
+      })),
+      ...videos.map((url, index) => ({
+        id: `video-${index}`,
+        type: 'input.video',
+        name: `Reference ${index + 1}`,
+        position: { x: 0, y: index * 100 },
+        config: { url, assetId: `video-${index + 1}`, mimeType: 'video/mp4' },
+      })),
+      {
+        id: 'generate',
+        type: 'ai.generate-video',
+        name: 'Generate video',
+        position: { x: 300, y: 0 },
+        config: {
+          provider: 'muse2api',
+          model: 'muse-video',
+          prompt: 'A quiet shoreline at sunrise.',
+          aspectRatio: '16:9',
+          duration: 5,
+          timeoutMs: 30_000,
+          retryCount: 0,
+          ...config,
+        },
+      },
+    ],
+    edges: [
+      ...images.map((_, index) => ({
+        id: `image-${index}-generate`,
+        source: `image-${index}`,
+        sourceHandle: 'image',
+        target: 'generate',
+        targetHandle: 'image',
+      })),
+      ...videos.map((_, index) => ({
+        id: `video-${index}-generate`,
+        source: `video-${index}`,
+        sourceHandle: 'video',
+        target: 'generate',
+        targetHandle: 'video',
+      })),
+    ],
+  } as WorkflowDefinition
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function mockImmediatePolling() {
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+  ) => {
+    if (delay === 1_500) queueMicrotask(callback)
+    return 0 as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout)
+  vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {})
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
+
 describe('node registry', () => {
   it('registers independent definitions and typed ports', () => {
     expect(registryByType.get('ai.generate-text')?.version).toBe(1)
@@ -63,13 +149,17 @@ describe('node registry', () => {
       expect.arrayContaining(['openai', 'anthropic', 'gemini', 'custom-http']),
     )
     expect(providersFor('video').map((provider) => provider.id)).toEqual(
-      expect.arrayContaining(['replicate', 'comfyui', 'custom-http']),
+      expect.arrayContaining(['muse2api', 'replicate', 'comfyui', 'custom-http']),
     )
   })
 })
 
 describe('workflow engine', () => {
-  beforeEach(() => vi.stubEnv('APP_OPENAI_API_KEY', ''))
+  beforeEach(() => {
+    vi.stubEnv('APP_OPENAI_API_KEY', '')
+    vi.stubEnv('APP_MUSE2API_BASE_URL', 'http://muse2api:18610/v1')
+    vi.stubEnv('APP_MUSE2API_API_KEY', 'muse-test-key')
+  })
 
   it('maps actual upstream values through explicit handles', async () => {
     const result = await runWorkflow(executableDefinition)
@@ -544,5 +634,192 @@ describe('workflow engine', () => {
     const result = await runWorkflow(definition)
     expect(result.status).toBe('failed')
     expect(result.error).toContain('accepts one value')
+  })
+})
+
+describe('Muse2API video provider', () => {
+  beforeEach(() => {
+    vi.stubEnv('APP_MUSE2API_BASE_URL', 'http://muse2api:18610/v1')
+    vi.stubEnv('APP_MUSE2API_API_KEY', 'muse-test-key')
+  })
+
+  it('submits a video task, polls until success, and resolves relative media URLs', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ id: 'task-123', status: 'queued' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'task-123',
+          status: 'succeeded',
+          model: 'muse-video',
+          result: { url: '/v1/media/generated.mp4' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    mockImmediatePolling()
+
+    const result = await runWorkflow(
+      muse2APIDefinition({ config: { aspectRatio: '9:16', duration: 90 } }),
+    )
+
+    expect(result.status).toBe('succeeded')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [createURL, createOptions] = fetchMock.mock.calls[0]
+    expect(createURL).toBe('http://muse2api:18610/v1/videos')
+    expect(createOptions?.method).toBe('POST')
+    expect(createOptions?.headers).toMatchObject({ Authorization: 'Bearer muse-test-key' })
+    expect(JSON.parse(String(createOptions?.body))).toEqual({
+      model: 'muse-video',
+      prompt: 'A quiet shoreline at sunrise.',
+      size: '9:16',
+      duration: 60,
+    })
+    expect(fetchMock.mock.calls[1][0]).toBe('http://muse2api:18610/v1/videos/task-123')
+    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({
+      Authorization: 'Bearer muse-test-key',
+    })
+    expect(result.records[0].outputs?.video).toMatchObject({
+      type: 'video',
+      value: { url: 'http://muse2api:18610/v1/media/generated.mp4' },
+      metadata: { provider: 'muse2api', model: 'muse-video', providerJobId: 'task-123' },
+    })
+  })
+
+  it('sends a first-frame image as a bounded data URL', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(Uint8Array.from([1, 2, 3]), {
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'task-image',
+          status: 'succeeded',
+          result: { url: 'http://muse2api:18610/v1/media/animated.mp4' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await runWorkflow(muse2APIDefinition({ images: ['/api/media/file/frame.png'] }))
+
+    expect(result.status).toBe('succeeded')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/api/media/file/frame.png')
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as { image?: string }
+    expect(body.image).toBe('data:image/png;base64,AQID')
+    expect(result.records.at(-1)?.outputs?.video?.metadata).toMatchObject({
+      referenceAssetId: 'asset-1',
+    })
+  })
+
+  it('fails before making a request when the server API key is missing', async () => {
+    vi.stubEnv('APP_MUSE2API_API_KEY', '')
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await runWorkflow(muse2APIDefinition())
+
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('APP_MUSE2API_API_KEY')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid gateway URLs before making a request', async () => {
+    vi.stubEnv('APP_MUSE2API_BASE_URL', 'http://muse2api:18610/v2')
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await runWorkflow(muse2APIDefinition())
+
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('APP_MUSE2API_BASE_URL')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('surfaces gateway authentication and task errors', async () => {
+    const unauthorizedFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'Invalid API key.' } }, 401))
+    vi.stubGlobal('fetch', unauthorizedFetch)
+    const unauthorized = await runWorkflow(muse2APIDefinition())
+    expect(unauthorized.status).toBe('failed')
+    expect(unauthorized.error).toContain('Invalid API key.')
+    expect(unauthorizedFetch).toHaveBeenCalledTimes(1)
+
+    vi.unstubAllGlobals()
+    const failedTaskFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ id: 'task-failed', status: 'queued' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'task-failed', status: 'failed', error: 'No available account.' }),
+      )
+    vi.stubGlobal('fetch', failedTaskFetch)
+    mockImmediatePolling()
+
+    const failedTask = await runWorkflow(muse2APIDefinition())
+    expect(failedTask.status).toBe('failed')
+    expect(failedTask.error).toContain('No available account.')
+    expect(failedTaskFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects malformed tasks and completed tasks without a media URL', async () => {
+    const missingIDFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ status: 'queued' }))
+    vi.stubGlobal('fetch', missingIDFetch)
+    const missingID = await runWorkflow(muse2APIDefinition())
+    expect(missingID.status).toBe('failed')
+    expect(missingID.error).toContain('task ID')
+
+    vi.unstubAllGlobals()
+    const missingURLFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ id: 'task-empty', status: 'succeeded' }))
+    vi.stubGlobal('fetch', missingURLFetch)
+    const missingURL = await runWorkflow(muse2APIDefinition())
+    expect(missingURL.status).toBe('failed')
+    expect(missingURL.error).toContain('without a video URL')
+  })
+
+  it('rejects unsupported extra references and invalid or oversized image files', async () => {
+    const noNetwork = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', noNetwork)
+    const multipleImages = await runWorkflow(
+      muse2APIDefinition({ images: ['/frame-1.png', '/frame-2.png'] }),
+    )
+    expect(multipleImages.error).toContain('one first-frame image')
+    const referenceVideo = await runWorkflow(muse2APIDefinition({ videos: ['/reference.mp4'] }))
+    expect(referenceVideo.error).toContain('first-frame image-to-video only')
+    expect(noNetwork).not.toHaveBeenCalled()
+
+    vi.unstubAllGlobals()
+    const wrongTypeFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response('{"not":"an image"}', {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', wrongTypeFetch)
+    const wrongType = await runWorkflow(
+      muse2APIDefinition({ images: ['/api/media/file/frame.json'] }),
+    )
+    expect(wrongType.status).toBe('failed')
+    expect(wrongType.error).toContain('must be image files')
+    expect(wrongTypeFetch).toHaveBeenCalledTimes(1)
+
+    vi.unstubAllGlobals()
+    const oversizedFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response('too large', {
+        headers: { 'Content-Type': 'image/png', 'Content-Length': String(10 * 1024 * 1024 + 1) },
+      }),
+    )
+    vi.stubGlobal('fetch', oversizedFetch)
+    const oversized = await runWorkflow(
+      muse2APIDefinition({ images: ['/api/media/file/huge.png'] }),
+    )
+    expect(oversized.status).toBe('failed')
+    expect(oversized.error).toContain('10 MB or smaller')
+    expect(oversizedFetch).toHaveBeenCalledTimes(1)
   })
 })
