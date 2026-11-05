@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
     root: path.resolve(dirname),
   },
   output: 'standalone',
+  outputFileTracingIncludes: {
+    '/api/[...slug]': ['./node_modules/.pnpm/strtok3@*/node_modules/strtok3/lib/**/*'],
+  },
   transpilePackages: ['@znith/be', '@znith/contracts', '@znith/fe', '@znith/utils'],
   typescript: {
     ignoreBuildErrors: true,
