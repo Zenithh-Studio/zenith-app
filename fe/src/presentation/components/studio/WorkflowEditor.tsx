@@ -135,15 +135,6 @@ function nodeSlug(node: WorkflowNode) {
   )
 }
 
-function portPosition(index: number, count: number, direction: 'input' | 'output') {
-  const midpoint = direction === 'input' ? 24 : 76
-  if (count <= 1) return midpoint
-
-  const start = direction === 'input' ? 8 : 60
-  const end = direction === 'input' ? 40 : 92
-  return start + ((end - start) * index) / (count - 1)
-}
-
 function TypedHandles({ definition }: { definition: ReturnType<typeof registryByType.get> }) {
   const inputTypes = [...new Set((definition?.inputs ?? []).map((port) => port.dataType))]
   return (
@@ -156,8 +147,8 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
             key={dataType}
             id={`type-${dataType}`}
             type="target"
-            position={Position.Top}
-            style={{ left: `${portPosition(index, inputTypes.length, 'input')}%`, top: -18 }}
+            position={Position.Left}
+            style={{ top: 52 + index * 36, left: -18 }}
             className={`!z-20 !grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
             title={`${dataType} input`}
           >
@@ -173,11 +164,8 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
             key={port.id}
             id={port.id}
             type="source"
-            position={Position.Top}
-            style={{
-              left: `${portPosition(index, definition.outputs.length, 'output')}%`,
-              top: -18,
-            }}
+            position={Position.Right}
+            style={{ top: 52 + index * 36, right: -18 }}
             className={`!z-20 !grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
             title={`${port.name} · ${port.dataType}`}
           >
