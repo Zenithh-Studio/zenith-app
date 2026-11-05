@@ -5,6 +5,7 @@ import {
   workflowTemplates,
 } from '@znith/contracts'
 import { cloneValue } from '@znith/utils'
+import { logServerEvent } from '../../../../lib/server-logger'
 import type {
   CreateWorkflowRequest,
   ExecutionDocument,
@@ -102,6 +103,11 @@ export class WorkflowService {
     }
     const execution = await this.repository.createExecution(executionInput)
     await this.repository.updateWorkflowRunState(id, 'running', startedAt.toISOString())
+    logServerEvent('info', 'workflow.execution.started', {
+      workflowId: id,
+      executionId: execution.id,
+      nodeCount: snapshot.nodes.length,
+    })
 
     const nodeRecordsById = new Map<string, NodeExecutionRecord>()
     let nodeRecordWrites = Promise.resolve()
@@ -128,10 +134,11 @@ export class WorkflowService {
     await nodeRecordWrites
     const completedAt = this.now()
     const nodeRecords: NodeExecutionRecord[] = runResult.records
+    const durationMs = completedAt.getTime() - startedAt.getTime()
     await this.repository.updateExecution(execution.id, {
       status: runResult.status,
       completedAt: completedAt.toISOString(),
-      durationMs: completedAt.getTime() - startedAt.getTime(),
+      durationMs,
       nodeRecords,
       logs: runResult.logs,
       error: runResult.error,
@@ -140,6 +147,18 @@ export class WorkflowService {
       id,
       runResult.status as WorkflowStatus,
       completedAt.toISOString(),
+    )
+    logServerEvent(
+      runResult.status === 'failed' ? 'warn' : 'info',
+      'workflow.execution.completed',
+      {
+        workflowId: id,
+        executionId: execution.id,
+        status: runResult.status,
+        durationMs,
+        nodeCount: snapshot.nodes.length,
+        failedNodeCount: nodeRecords.filter((record) => record.status === 'failed').length,
+      },
     )
 
     return { executionId: execution.id, ...runResult }

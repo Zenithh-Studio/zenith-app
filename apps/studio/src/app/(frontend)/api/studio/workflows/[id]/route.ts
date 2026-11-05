@@ -1,22 +1,23 @@
 import { updateWorkflowRequestSchema } from '@znith/contracts'
 import { getWorkflowService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
+import { withContextApiLogging } from '@/lib/server-logger'
 
 type WorkflowRouteContext = { params: Promise<{ id: string }> }
 
-export async function GET(_request: Request, context: WorkflowRouteContext) {
+async function getWorkflow(_request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
   try {
     const workflowService = await getWorkflowService()
     const { workflow, executions } = await workflowService.getWorkflow(id)
     if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json({ workflow, executions })
-  } catch {
-    return backendUnavailableResponse()
+  } catch (error) {
+    return backendUnavailableResponse(error, '/api/studio/workflows/[id]')
   }
 }
 
-export async function PATCH(request: Request, context: WorkflowRouteContext) {
+async function updateWorkflow(request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
   let requestBody: unknown
   try {
@@ -38,19 +39,23 @@ export async function PATCH(request: Request, context: WorkflowRouteContext) {
     const workflow = await workflowService.updateWorkflow(id, parsedRequest.data)
     if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json({ workflow })
-  } catch {
-    return backendUnavailableResponse()
+  } catch (error) {
+    return backendUnavailableResponse(error, '/api/studio/workflows/[id]')
   }
 }
 
-export async function DELETE(_request: Request, context: WorkflowRouteContext) {
+async function deleteWorkflow(_request: Request, context: WorkflowRouteContext) {
   const { id } = await context.params
   try {
     const workflowService = await getWorkflowService()
     const deleted = await workflowService.deleteWorkflow(id)
     if (!deleted) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return new Response(null, { status: 204 })
-  } catch {
-    return backendUnavailableResponse()
+  } catch (error) {
+    return backendUnavailableResponse(error, '/api/studio/workflows/[id]')
   }
 }
+
+export const GET = withContextApiLogging('/api/studio/workflows/[id]', getWorkflow)
+export const PATCH = withContextApiLogging('/api/studio/workflows/[id]', updateWorkflow)
+export const DELETE = withContextApiLogging('/api/studio/workflows/[id]', deleteWorkflow)
