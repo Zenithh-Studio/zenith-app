@@ -168,8 +168,8 @@ export const nodeRegistry: NodeDefinition[] = [
     ],
     outputs: [output('image', 'Image', 'image')],
     defaultConfig: {
-      provider: 'openai',
-      model: 'dall-e-3',
+      provider: 'chatgpt2api',
+      model: 'gpt-image-2',
       prompt: '',
       aspectRatio: '1:1',
       quality: 'standard',
