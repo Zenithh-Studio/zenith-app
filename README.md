@@ -10,7 +10,9 @@ Requirements: Docker Engine and the Docker Compose plugin.
 docker compose up -d --build
 ```
 
-Open [http://localhost:3001](http://localhost:3001) for the studio. Open [http://localhost:3001/admin](http://localhost:3001/admin) to create the first Payload administrator and manage workflows, executions, and media. The app creates a persistent Payload secret on first startup. Set `APP_PORT=3000` if that host port is free.
+The Compose stack starts the studio, PostgreSQL, and the pinned ChatGPT2API gateway. Set `CHATGPT2API_AUTH_KEY` in `.env` before the first start; generate a private value with `openssl rand -hex 32`. The same value is passed to the gateway and the studio server. If you use `APP_CHATGPT2API_API_KEY` instead, Compose uses it as a fallback. Do not put either key in a workflow or commit it.
+
+Open [http://localhost:3001](http://localhost:3001) for the studio and [http://localhost:3001/admin](http://localhost:3001/admin) to create the first Payload administrator. Open [http://localhost:3000](http://localhost:3000) to configure ChatGPT2API and add the ChatGPT account(s) it will use. The app creates a persistent Payload secret on first startup. If port 3001 is occupied, set `APP_PORT` to another free port; if port 3000 is occupied, set `CHATGPT2API_PORT` to another free port.
 
 The database is available to host tools at `127.0.0.1:55432`; the app connects to it over the private Compose network. PostgreSQL data, uploaded files, and the generated secret are kept in named Docker volumes.
 
