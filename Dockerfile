@@ -21,6 +21,7 @@ COPY . .
 ARG SITE_URL=http://localhost:3001
 ENV SITE_URL=$SITE_URL
 ENV NEXT_PUBLIC_SITE_URL=$SITE_URL
+RUN mkdir -p public
 RUN PAYLOAD_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")" \
     DATABASE_URL=postgresql://znith:local-only@127.0.0.1:5432/znith \
     pnpm build
