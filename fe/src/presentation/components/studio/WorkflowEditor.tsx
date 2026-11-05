@@ -352,19 +352,16 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
 
     return (
       <div
-        className={`relative w-[352px] rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+        className={`relative w-[352px] ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.2)]' : ''}`}
       >
         <TypedHandles definition={definition} />
-        <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
-          <span className={`grid size-8 place-items-center rounded-xl ${tone.icon}`}>
-            <Icon size={15} />
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <span className={`grid size-7 place-items-center rounded-lg ${tone.icon}`}>
+            <Icon size={14} />
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-zinc-900">
-              {data.workflowNode.name}
-            </div>
-            <div className="text-[10px] text-zinc-400">@{slug}</div>
-          </div>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
+            {data.workflowNode.name}
+          </span>
           {record?.status === 'running' ? (
             <LoaderCircle size={15} className="animate-spin text-violet-600" />
           ) : record?.status === 'succeeded' ? (
@@ -375,37 +372,44 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
             <GripVertical size={15} className="text-zinc-300" />
           )}
         </div>
-        <div className="p-3.5 pb-2.5">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-              {isPrompt ? 'Prompt content' : 'Text content'}
-            </span>
-            <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-medium text-zinc-500">
-              {isPrompt ? 'Reusable prompt' : 'Plain text'}
-            </span>
+        <div
+          className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+        >
+          <div className="p-3.5 pb-2.5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                {isPrompt ? 'Prompt content' : 'Text content'}
+              </span>
+              <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-medium text-zinc-500">
+                {isPrompt ? 'Reusable prompt' : 'Plain text'}
+              </span>
+            </div>
+            <textarea
+              aria-label={`${data.workflowNode.name} content`}
+              className="nodrag nowheel min-h-[184px] max-h-[360px] w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs leading-[1.65] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-50"
+              placeholder={
+                isPrompt
+                  ? 'Write a reusable prompt or creative brief…'
+                  : 'Enter text to pass to connected nodes…'
+              }
+              rows={8}
+              value={value}
+              onChange={(event) =>
+                textNodeEditor?.updateValue(data.workflowNode.id, event.target.value)
+              }
+              onBlur={() => textNodeEditor?.finishEditing(data.workflowNode.id)}
+            />
           </div>
-          <textarea
-            aria-label={`${data.workflowNode.name} content`}
-            className="nodrag nowheel min-h-[184px] max-h-[360px] w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs leading-[1.65] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-50"
-            placeholder={
-              isPrompt
-                ? 'Write a reusable prompt or creative brief…'
-                : 'Enter text to pass to connected nodes…'
-            }
-            rows={8}
-            value={value}
-            onChange={(event) =>
-              textNodeEditor?.updateValue(data.workflowNode.id, event.target.value)
-            }
-            onBlur={() => textNodeEditor?.finishEditing(data.workflowNode.id)}
-          />
+          <div className="flex items-center justify-between border-t border-zinc-100 px-3.5 py-2.5 text-[10px] text-zinc-400">
+            <span className="inline-flex items-center gap-1.5">
+              <Type size={12} />
+              {definition?.outputs.length ?? 0} text output
+            </span>
+            <span>{Array.from(value).length.toLocaleString()} characters</span>
+          </div>
         </div>
-        <div className="flex items-center justify-between border-t border-zinc-100 px-3.5 py-2.5 text-[10px] text-zinc-400">
-          <span className="inline-flex items-center gap-1.5">
-            <Type size={12} />
-            {definition?.outputs.length ?? 0} text output
-          </span>
-          <span>{Array.from(value).length.toLocaleString()} characters</span>
+        <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-500">
+          <span>@{slug}</span>
         </div>
       </div>
     )
