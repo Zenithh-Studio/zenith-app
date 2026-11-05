@@ -18,7 +18,8 @@ import {
   Trash2,
   Workflow as WorkflowIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { workflowTemplates } from '@znith/contracts'
 import type { WorkflowDocument } from '@znith/contracts'
 import { formatDate, slugify } from '@znith/utils'
@@ -61,14 +62,23 @@ export function WorkflowDashboard() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const [activeMenu, setActiveMenu] = useState<string | null>(null)
+  const [activeMenu, setActiveMenu] = useState<{
+    workflowId: string
+    left: number
+    top: number
+  } | null>(null)
   const [error, setError] = useState('')
   const [newestFirst, setNewestFirst] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
+  const menuPanelRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const displayedWorkflows = [...workflows].sort((a, b) => {
     const difference = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     return newestFirst ? difference : -difference
   })
+  const activeWorkflow = activeMenu
+    ? workflows.find((workflow) => workflow.id === activeMenu.workflowId)
+    : undefined
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,6 +93,56 @@ export function WorkflowDashboard() {
     const timeout = setTimeout(load, 200)
     return () => clearTimeout(timeout)
   }, [load])
+
+  useEffect(() => {
+    if (!activeMenu) return
+
+    const dismissMenu = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (menuPanelRef.current?.contains(target) || menuTriggerRef.current?.contains(target)) return
+      setActiveMenu(null)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActiveMenu(null)
+    }
+    const dismissOnViewportChange = () => setActiveMenu(null)
+
+    document.addEventListener('pointerdown', dismissMenu)
+    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('resize', dismissOnViewportChange)
+    window.addEventListener('scroll', dismissOnViewportChange, true)
+    return () => {
+      document.removeEventListener('pointerdown', dismissMenu)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', dismissOnViewportChange)
+      window.removeEventListener('scroll', dismissOnViewportChange, true)
+    }
+  }, [activeMenu])
+
+  const toggleWorkflowMenu = (event: MouseEvent<HTMLButtonElement>, workflowId: string) => {
+    event.stopPropagation()
+    if (activeMenu?.workflowId === workflowId) {
+      setActiveMenu(null)
+      return
+    }
+
+    const anchor = event.currentTarget.getBoundingClientRect()
+    const menuWidth = 176
+    const menuHeight = 152
+    const gutter = 8
+    menuTriggerRef.current = event.currentTarget
+    setActiveMenu({
+      workflowId,
+      left: Math.max(
+        gutter,
+        Math.min(anchor.right - menuWidth, window.innerWidth - menuWidth - gutter),
+      ),
+      top:
+        anchor.bottom + menuHeight + gutter <= window.innerHeight
+          ? anchor.bottom + 4
+          : Math.max(gutter, anchor.top - menuHeight - 4),
+    })
+  }
 
   const create = async (templateId: string) => {
     const response = await fetch('/api/studio/workflows', {
@@ -294,16 +354,16 @@ export function WorkflowDashboard() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-left text-sm">
+                <table className="w-full min-w-[800px] table-fixed text-left text-sm">
                   <thead className="bg-zinc-50/80 text-xs font-medium text-zinc-500">
                     <tr>
-                      <th className="px-5 py-3.5">Workflow</th>
-                      <th className="px-4 py-3.5">Category</th>
-                      <th className="px-4 py-3.5">Nodes</th>
-                      <th className="px-4 py-3.5">Last execution</th>
-                      <th className="px-4 py-3.5">Status</th>
-                      <th className="px-4 py-3.5">Updated</th>
-                      <th className="w-14 px-4 py-3.5" />
+                      <th className="w-[26%] px-5 py-3.5">Workflow</th>
+                      <th className="w-[13%] px-4 py-3.5">Category</th>
+                      <th className="w-[8%] px-4 py-3.5">Nodes</th>
+                      <th className="w-[16%] px-4 py-3.5">Last execution</th>
+                      <th className="w-[12%] px-4 py-3.5">Status</th>
+                      <th className="w-[17%] px-4 py-3.5">Updated</th>
+                      <th className="w-[8%] px-2 py-3.5" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
@@ -332,43 +392,19 @@ export function WorkflowDashboard() {
                         <td className="px-4 py-4 text-zinc-500">
                           {formatDate(workflow.updatedAt)}
                         </td>
-                        <td className="relative px-4 py-4">
+                        <td className="px-2 py-4 text-right">
                           <button
-                            onClick={() =>
-                              setActiveMenu(activeMenu === workflow.id ? null : workflow.id)
+                            ref={
+                              activeMenu?.workflowId === workflow.id ? menuTriggerRef : undefined
                             }
-                            className="grid size-8 place-items-center rounded-lg text-zinc-400 hover:bg-white hover:text-zinc-700"
+                            onClick={(event) => toggleWorkflowMenu(event, workflow.id)}
+                            aria-label={`Actions for ${workflow.name}`}
+                            aria-haspopup="true"
+                            aria-expanded={activeMenu?.workflowId === workflow.id}
+                            className="ml-auto grid size-8 place-items-center rounded-lg text-zinc-400 hover:bg-white hover:text-zinc-700"
                           >
                             <Ellipsis size={18} />
                           </button>
-                          {activeMenu === workflow.id && (
-                            <div className="absolute right-8 top-11 z-20 w-44 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
-                              <button
-                                onClick={() => run(workflow)}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-zinc-50"
-                              >
-                                <Play size={14} /> Run workflow
-                              </button>
-                              <button
-                                onClick={() => duplicate(workflow)}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-zinc-50"
-                              >
-                                <Copy size={14} /> Duplicate
-                              </button>
-                              <button
-                                onClick={() => exportWorkflow(workflow)}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-zinc-50"
-                              >
-                                <Download size={14} /> Export JSON
-                              </button>
-                              <button
-                                onClick={() => remove(workflow)}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-rose-600 hover:bg-rose-50"
-                              >
-                                <Trash2 size={14} /> Delete
-                              </button>
-                            </div>
-                          )}
                         </td>
                       </tr>
                     ))}
@@ -379,6 +415,55 @@ export function WorkflowDashboard() {
           </div>
         </div>
       </section>
+      {activeMenu && activeWorkflow && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={menuPanelRef}
+              role="group"
+              aria-label="Workflow actions"
+              style={{ left: activeMenu.left, top: activeMenu.top }}
+              className="fixed z-[100] w-44 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-900/10"
+            >
+              <button
+                onClick={() => {
+                  setActiveMenu(null)
+                  void run(activeWorkflow)
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
+              >
+                <Play size={14} /> Run workflow
+              </button>
+              <button
+                onClick={() => {
+                  setActiveMenu(null)
+                  void duplicate(activeWorkflow)
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
+              >
+                <Copy size={14} /> Duplicate
+              </button>
+              <button
+                onClick={() => {
+                  exportWorkflow(activeWorkflow)
+                  setActiveMenu(null)
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
+              >
+                <Download size={14} /> Export JSON
+              </button>
+              <button
+                onClick={() => {
+                  setActiveMenu(null)
+                  void remove(activeWorkflow)
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-rose-600 hover:bg-rose-50"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </main>
   )
 }
