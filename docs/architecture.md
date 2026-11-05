@@ -2,13 +2,13 @@
 
 ## Workspace map
 
-- **Next.js app (`src/`)** owns App Router entry points, Payload Admin/API routes, `payload.config.ts`, and the service composition root.
-- **Frontend (`fe/`)** contains route-level view components, browser interactions, shared layout, and styles. It does not access Payload credentials or persistence directly.
-- **Backend (`be/`)** contains workflow and asset application services, repository ports, Payload repository adapters, provider execution, and collection definitions.
+- **Studio app (`apps/studio/`)** owns the Next.js App Router, Payload Admin/API routes, application configuration, and runtime composition.
+- **Studio features (`apps/studio/src/features/`)** contain route views, browser interactions, shared layout, and styles. They do not access Payload credentials or persistence directly.
+- **Studio server (`apps/studio/src/server/`)** contains workflow and asset application services, repository ports, Payload adapters, provider execution, and collection definitions.
 - **Contracts (`packages/contracts/`)** owns workflow DTOs, Zod request schemas, node types, provider catalog, registry, and starter templates. It has no dependency on React, Next.js, or Payload.
 - **Utilities (`packages/utils/`)** contains pure functions reused across workspace boundaries.
 
-Next.js transpiles local packages through `transpilePackages`. The root app is packaged as a standalone Next.js server and runs with PostgreSQL through Docker Compose.
+Next.js transpiles the shared packages through `transpilePackages`. The Studio app is packaged as a standalone Next.js server and runs with PostgreSQL through Docker Compose.
 
 ## Dependency direction
 
@@ -17,11 +17,11 @@ App Router handlers → application services → domain repository ports
                                          ↑
 Payload repositories and provider engine ─┘
 
-Frontend components → shared contracts and utilities
-Backend services   → shared contracts and utilities
+Frontend features → shared contracts and utilities
+Backend services  → shared contracts and utilities
 ```
 
-The root route files are transport adapters. They validate request bodies, call the composed application service, and shape HTTP responses. The `src/lib/backend-services.ts` composition root injects the Payload Local API into backend repositories.
+The route files are transport adapters. They validate request bodies, call the composed application service, and shape HTTP responses. `apps/studio/src/lib/backend-services.ts` injects the Payload Local API into backend repositories.
 
 ## Workflow execution
 
@@ -39,7 +39,7 @@ The snapshot is retained for reproducibility. Large binary media belongs in Payl
 - **Domain:** repository interfaces and domain-facing data contracts.
 - **Application:** workflow and asset services that coordinate validation, template defaults, execution lifecycle, and file rules.
 - **Infrastructure:** Payload Local API adapters, provider calls, and the graph execution engine.
-- **Presentation:** Next.js route handlers in `src/app/(frontend)/api/studio`, kept thin and independent of persistence details.
+- **Presentation:** Next.js route handlers in `apps/studio/src/app/(frontend)/api/studio`, kept thin and independent of persistence details.
 
 ## Security and operations
 

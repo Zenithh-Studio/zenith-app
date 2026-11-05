@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 commit_message=$(head -n 1 "$1")
 if ! printf '%s\n' "$commit_message" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9._/-]+\))?!?: .+'; then
-  echo "Commit message must follow Conventional Commits, for example: feat(be/workflows): add retry policy"
+  echo "Commit message must follow Conventional Commits, for example: feat(studio/workflows): add retry policy"
   exit 1
 fi

@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+pnpm-lock.yaml
+apps/studio/next-env.d.ts
+apps/studio/src/app/(payload)/
+apps/studio/src/payload-types.ts

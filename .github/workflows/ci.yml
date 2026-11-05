@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   quality:
-    name: Format, types, and tests
+    name: Format, lint, types, and tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

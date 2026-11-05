@@ -1,11 +1,5 @@
 export type ProviderId =
-  | 'openai'
-  | 'chatgpt2api'
-  | 'anthropic'
-  | 'gemini'
-  | 'replicate'
-  | 'comfyui'
-  | 'custom-http'
+  'openai' | 'chatgpt2api' | 'anthropic' | 'gemini' | 'replicate' | 'comfyui' | 'custom-http'
 
 export type ProviderModality = 'text' | 'vision' | 'image' | 'video'
 

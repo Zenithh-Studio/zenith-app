@@ -66,8 +66,8 @@ services:
     ports:
       - '${APP_PORT:-3001}:3000'
     volumes:
-      - payload-uploads:/app/uploads
-      - payload-secrets:/app/data
+      - payload-uploads:/app/apps/studio/uploads
+      - payload-secrets:/app/apps/studio/data
     healthcheck:
       test:
         [

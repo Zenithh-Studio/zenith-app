@@ -1,6 +1,6 @@
 # Node Development
 
-Workflow node contracts live in `packages/contracts/src/workflow/registry.ts`. Execution behavior lives in `be/src/modules/workflows/infrastructure/engine.ts`, while the editor renders the metadata in `fe/src/presentation/components/studio/WorkflowEditor.tsx`.
+Workflow node contracts live in `packages/contracts/src/workflow/registry.ts`. Execution behavior lives in `apps/studio/src/server/modules/workflows/infrastructure/engine.ts`, while the editor renders the metadata in `apps/studio/src/features/studio/presentation/components/studio/WorkflowEditor.tsx`.
 
 ## Add a node
 

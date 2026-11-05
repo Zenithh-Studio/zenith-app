@@ -1,0 +1,43 @@
+{
+  "name": "@znith/studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/run-cli.mjs next dev",
+    "build": "node scripts/run-cli.mjs payload build",
+    "start": "node scripts/run-cli.mjs next start",
+    "typecheck": "tsc --noEmit --pretty false -p tsconfig.json",
+    "generate:importmap": "node scripts/run-cli.mjs payload generate:importmap",
+    "generate:types": "node scripts/run-cli.mjs payload generate:types",
+    "payload": "node scripts/run-cli.mjs payload"
+  },
+  "dependencies": {
+    "@payloadcms/db-postgres": "4.0.0-beta.4",
+    "@payloadcms/next": "4.0.0-beta.4",
+    "@payloadcms/plugin-mcp": "4.0.0-beta.4",
+    "@payloadcms/richtext-lexical": "4.0.0-beta.4",
+    "@payloadcms/translations": "4.0.0-beta.4",
+    "@payloadcms/ui": "4.0.0-beta.4",
+    "@xyflow/react": "^12.12.1",
+    "@znith/contracts": "workspace:*",
+    "@znith/utils": "workspace:*",
+    "graphql": "^16.8.1",
+    "lucide-react": "^1.68.0",
+    "next": "16.4.2",
+    "payload": "4.0.0-beta.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "24.12.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.0.0"
+  }
+}

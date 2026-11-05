@@ -9,8 +9,7 @@ RUN corepack enable && corepack prepare pnpm@10.34.3 --activate
 FROM base AS dependencies
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY be/package.json be/package.json
-COPY fe/package.json fe/package.json
+COPY apps/studio/package.json apps/studio/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/utils/package.json packages/utils/package.json
 RUN pnpm install --frozen-lockfile
@@ -21,7 +20,7 @@ COPY . .
 ARG SITE_URL=http://localhost:3001
 ENV SITE_URL=$SITE_URL
 ENV NEXT_PUBLIC_SITE_URL=$SITE_URL
-RUN mkdir -p public
+RUN mkdir -p apps/studio/public
 RUN PAYLOAD_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")" \
     DATABASE_URL=postgresql://znith:local-only@127.0.0.1:5432/znith \
     pnpm build
@@ -36,12 +35,12 @@ WORKDIR /app
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs \
-  && mkdir -p /app/uploads /app/data \
+  && mkdir -p /app/apps/studio/uploads /app/apps/studio/data \
   && chown -R nextjs:nodejs /app
 
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/public ./apps/studio/public
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
 
 USER nextjs
