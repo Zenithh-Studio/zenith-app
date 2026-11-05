@@ -2,6 +2,7 @@ import type { CollectionConfig } from 'payload'
 
 export const Executions: CollectionConfig = {
   slug: 'executions',
+  indexes: [{ fields: ['workflow', 'startedAt'] }],
   admin: {
     group: 'Znith Studio',
     useAsTitle: 'id',
