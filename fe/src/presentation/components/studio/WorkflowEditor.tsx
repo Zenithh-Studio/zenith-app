@@ -57,6 +57,7 @@ import {
   Zap,
 } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { nodeRegistry, providersFor, registryByType } from '@znith/contracts'
 import type {
@@ -134,6 +135,15 @@ function nodeSlug(node: WorkflowNode) {
   )
 }
 
+function portPosition(index: number, count: number, direction: 'input' | 'output') {
+  const midpoint = direction === 'input' ? 24 : 76
+  if (count <= 1) return midpoint
+
+  const start = direction === 'input' ? 8 : 60
+  const end = direction === 'input' ? 40 : 92
+  return start + ((end - start) * index) / (count - 1)
+}
+
 function TypedHandles({ definition }: { definition: ReturnType<typeof registryByType.get> }) {
   const inputTypes = [...new Set((definition?.inputs ?? []).map((port) => port.dataType))]
   return (
@@ -146,9 +156,9 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
             key={dataType}
             id={`type-${dataType}`}
             type="target"
-            position={Position.Left}
-            style={{ top: 72 + index * 36 }}
-            className={`!grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
+            position={Position.Top}
+            style={{ left: `${portPosition(index, inputTypes.length, 'input')}%`, top: -18 }}
+            className={`!z-20 !grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
             title={`${dataType} input`}
           >
             <Icon size={12} className="pointer-events-none text-white" />
@@ -163,9 +173,12 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
             key={port.id}
             id={port.id}
             type="source"
-            position={Position.Right}
-            style={{ top: 72 + index * 36 }}
-            className={`!grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
+            position={Position.Top}
+            style={{
+              left: `${portPosition(index, definition.outputs.length, 'output')}%`,
+              top: -18,
+            }}
+            className={`!z-20 !grid !size-7 !place-items-center !rounded-lg !border-2 !border-white !shadow-md ${visual.className}`}
             title={`${port.name} · ${port.dataType}`}
           >
             <Icon size={12} className="pointer-events-none text-white" />
@@ -176,24 +189,84 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
   )
 }
 
+function mediaSource(value: unknown, assetId?: unknown, fileName?: unknown) {
+  const source = typeof value === 'string' ? value : ''
+  if (!assetId) return source
+
+  if (source) {
+    try {
+      const parsed = new URL(source, 'http://payload.local')
+      if (parsed.pathname.startsWith('/api/media/file/')) {
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`
+      }
+    } catch {
+      // Fall back to the upload filename when Payload returns a malformed URL.
+    }
+  }
+
+  return typeof fileName === 'string' && fileName
+    ? `/api/media/file/${encodeURIComponent(fileName)}`
+    : source
+}
+
+function imageRatioLabel(width: number, height: number) {
+  const roundedWidth = Math.round(width)
+  const roundedHeight = Math.round(height)
+  let a = roundedWidth
+  let b = roundedHeight
+  while (b !== 0) [a, b] = [b, a % b]
+  const divisor = Math.max(a, 1)
+  return `${roundedWidth / divisor}:${roundedHeight / divisor}`
+}
+
 function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const definition = registryByType.get(data.workflowNode.type)
   const tone = categoryTone[definition?.category ?? 'Utility']
   const Icon = iconByType[data.workflowNode.type] ?? Zap
   const record = data.record
   const preview = record?.outputs ? Object.values(record.outputs)[0]?.value : undefined
+  const previewObject =
+    preview && typeof preview === 'object' ? (preview as Record<string, unknown>) : null
   const mediaType = definition?.outputs.find(
     (port) => port.dataType === 'image' || port.dataType === 'video',
   )?.dataType
-  const mediaValue =
-    preview && typeof preview === 'object'
-      ? String((preview as Record<string, unknown>).url || '')
-      : String(data.workflowNode.config.url || '')
+  const mediaAssetId = previewObject?.assetId ?? data.workflowNode.config.assetId
+  const mediaFileName = previewObject?.filename ?? data.workflowNode.config.fileName
+  const mediaValue = mediaSource(
+    previewObject?.url ?? (typeof preview === 'string' ? preview : data.workflowNode.config.url),
+    mediaAssetId,
+    mediaFileName,
+  )
   const slug = nodeSlug(data.workflowNode)
   const ratio = String(
     data.workflowNode.config.aspectRatio || (mediaType === 'video' ? '16:9' : '1:1'),
   )
   const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
+  const [measuredImage, setMeasuredImage] = useState<{
+    source: string
+    width: number
+    height: number
+  } | null>(null)
+  const configuredImageWidth = Number(
+    previewObject?.width ?? data.workflowNode.config.imageWidth ?? 0,
+  )
+  const configuredImageHeight = Number(
+    previewObject?.height ?? data.workflowNode.config.imageHeight ?? 0,
+  )
+  const imageDimensions =
+    mediaType === 'image' && configuredImageWidth > 0 && configuredImageHeight > 0
+      ? { width: configuredImageWidth, height: configuredImageHeight }
+      : measuredImage?.source === mediaValue
+        ? measuredImage
+        : null
+  const mediaRatio =
+    mediaType === 'image' && imageDimensions
+      ? `${imageDimensions.width} / ${imageDimensions.height}`
+      : `${ratioWidth || 1} / ${ratioHeight || 1}`
+  const mediaRatioLabel =
+    mediaType === 'image' && imageDimensions
+      ? imageRatioLabel(imageDimensions.width, imageDimensions.height)
+      : ratio
 
   if (mediaType) {
     return (
@@ -220,18 +293,47 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         </div>
         <div
           className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
-          style={{ aspectRatio: `${ratioWidth || 1} / ${ratioHeight || 1}` }}
+          style={{ aspectRatio: mediaRatio }}
         >
           {record?.error ? (
             <div className="p-5 text-center text-xs text-rose-600">{record.error}</div>
           ) : mediaValue ? (
             mediaType === 'video' ? (
               <video src={mediaValue} controls className="size-full object-contain" />
+            ) : mediaAssetId ? (
+              <Image
+                src={mediaValue}
+                alt={data.workflowNode.name}
+                fill
+                sizes="320px"
+                unoptimized
+                className="object-contain"
+                onLoad={(event) => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget
+                  if (naturalWidth > 0 && naturalHeight > 0) {
+                    setMeasuredImage({
+                      source: mediaValue,
+                      width: naturalWidth,
+                      height: naturalHeight,
+                    })
+                  }
+                }}
+              />
             ) : (
               <img
                 src={mediaValue}
                 alt={data.workflowNode.name}
                 className="size-full object-contain"
+                onLoad={(event) => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget
+                  if (naturalWidth > 0 && naturalHeight > 0) {
+                    setMeasuredImage({
+                      source: mediaValue,
+                      width: naturalWidth,
+                      height: naturalHeight,
+                    })
+                  }
+                }}
               />
             )
           ) : mediaType === 'video' ? (
@@ -242,7 +344,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         </div>
         <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-500">
           <span>@{slug}</span>
-          <span>{ratio}</span>
+          <span>{mediaRatioLabel}</span>
         </div>
       </div>
     )
@@ -383,7 +485,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [paletteSearch, setPaletteSearch] = useState('')
-  const [paletteOpen, setPaletteOpen] = useState(true)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
@@ -589,9 +691,14 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     if (!response.ok) return setError(responseBody.error || 'Could not upload media.')
     const config = {
       assetId: responseBody.media.id,
-      url: responseBody.media.url,
+      url: mediaSource(responseBody.media.url, responseBody.media.id, responseBody.media.filename),
       fileName: responseBody.media.filename || file.name,
       mimeType: responseBody.media.mimeType || file.type,
+      ...(file.type.startsWith('image/') &&
+      responseBody.media.width > 0 &&
+      responseBody.media.height > 0
+        ? { imageWidth: responseBody.media.width, imageHeight: responseBody.media.height }
+        : {}),
     }
     if (
       uploadTarget.current === 'selected' &&
@@ -979,7 +1086,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
       <div className="flex min-h-0 flex-1">
         {paletteOpen ? (
-          <aside className="z-10 hidden w-[250px] shrink-0 flex-col border-r border-zinc-200 bg-white lg:flex">
+          <aside className="z-10 flex w-[250px] shrink-0 flex-col border-r border-zinc-200 bg-white">
             <div className="flex items-center justify-between px-4 pb-3 pt-4">
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
                 Node library
@@ -1049,6 +1156,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           <button
             onClick={() => setPaletteOpen(true)}
             className="absolute left-4 top-20 z-20 grid size-10 place-items-center rounded-xl border border-zinc-200 bg-white text-zinc-600 shadow-lg"
+            aria-label="Open node library"
+            title="Open node library"
           >
             <Menu size={17} />
           </button>
@@ -1603,16 +1712,21 @@ function MediaConfiguration({
           {config.url ? (
             type === 'input.video' ? (
               <video
-                src={String(config.url)}
+                src={mediaSource(config.url, config.assetId, config.fileName)}
                 controls
                 className="h-40 w-full rounded-xl bg-zinc-950 object-contain"
               />
             ) : (
-              <img
-                src={String(config.url)}
-                alt=""
-                className="h-40 w-full rounded-xl bg-zinc-100 object-contain"
-              />
+              <div className="relative h-40 w-full overflow-hidden rounded-xl bg-zinc-100">
+                <Image
+                  src={mediaSource(config.url, config.assetId, config.fileName)}
+                  alt=""
+                  fill
+                  sizes="280px"
+                  unoptimized
+                  className="object-contain"
+                />
+              </div>
             )
           ) : null}
           <button
