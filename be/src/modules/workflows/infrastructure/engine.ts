@@ -113,6 +113,7 @@ const absoluteMediaURL = (value: unknown) => {
 function requireSecret(
   name:
     | 'APP_OPENAI_API_KEY'
+    | 'APP_CHATGPT2API_API_KEY'
     | 'APP_ANTHROPIC_API_KEY'
     | 'APP_GEMINI_API_KEY'
     | 'REPLICATE_API_TOKEN',
@@ -123,6 +124,102 @@ function requireSecret(
       `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Set the ${name} server environment variable.`,
     )
   return value
+}
+
+function chatGPT2APIEndpoint(path: 'images/generations' | 'images/edits') {
+  const baseURL = process.env.APP_CHATGPT2API_BASE_URL
+  if (!baseURL) {
+    throw new Error(
+      'ChatGPT2API is not configured. Set the APP_CHATGPT2API_BASE_URL server environment variable.',
+    )
+  }
+
+  let url: URL
+  try {
+    url = new URL(`${baseURL.replace(/\/+$/, '')}/`)
+  } catch {
+    throw new Error('APP_CHATGPT2API_BASE_URL must be a valid absolute URL ending in /v1.')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('APP_CHATGPT2API_BASE_URL must use HTTP or HTTPS.')
+  }
+  if (url.username || url.password) {
+    throw new Error(
+      'Do not put credentials in APP_CHATGPT2API_BASE_URL; use APP_CHATGPT2API_API_KEY.',
+    )
+  }
+  if (!url.pathname.replace(/\/+$/, '').endsWith('/v1')) {
+    throw new Error('APP_CHATGPT2API_BASE_URL must point to the service /v1 API root.')
+  }
+  return new URL(path, url).toString()
+}
+
+type ImageAPIItem = NonNullable<ImageAPIResponse['data']>[number]
+
+type ImageAPIResponse = {
+  data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }>
+  error?: { message?: string }
+}
+
+function imageResultURL(image?: ImageAPIItem) {
+  if (image?.url) return image.url
+  if (image?.b64_json) return `data:image/png;base64,${image.b64_json}`
+  return ''
+}
+
+async function requestChatGPT2APIImage(input: {
+  model: string
+  prompt: string
+  references?: NodeValue[]
+}) {
+  const apiKey = requireSecret('APP_CHATGPT2API_API_KEY')
+  const references = input.references ?? []
+  let response: Response
+
+  if (references.length) {
+    const form = new FormData()
+    form.set('model', input.model)
+    form.set('prompt', input.prompt)
+    form.set('n', '1')
+    form.set('response_format', 'b64_json')
+    for (const [index, reference] of references.entries()) {
+      const source = await fetch(absoluteMediaURL(reference.value))
+      if (!source.ok) throw new Error(`Could not download reference image ${index + 1}.`)
+      form.append(
+        references.length > 1 ? 'image[]' : 'image',
+        new Blob([await source.arrayBuffer()], {
+          type: source.headers.get('content-type') || 'image/png',
+        }),
+        `reference-${index + 1}.png`,
+      )
+    }
+    response = await fetch(chatGPT2APIEndpoint('images/edits'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    })
+  } else {
+    response = await fetch(chatGPT2APIEndpoint('images/generations'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: input.model,
+        prompt: input.prompt,
+        n: 1,
+        response_format: 'b64_json',
+      }),
+    })
+  }
+
+  const payload = (await response.json()) as ImageAPIResponse
+  if (!response.ok)
+    throw new Error(
+      payload.error?.message || `ChatGPT2API image request failed (${response.status}).`,
+    )
+  const image = payload.data?.[0]
+  const url = imageResultURL(image)
+  if (!url) throw new Error('ChatGPT2API completed without image data or a media URL.')
+  return { url, revisedPrompt: image?.revised_prompt }
 }
 
 async function runReplicate(model: string, input: Record<string, unknown>) {
@@ -657,6 +754,25 @@ async function executeNode(
         if (!url) throw new Error('Custom provider completed without a media URL.')
         return { image: { type: 'image', value: { url }, metadata: { provider } } }
       }
+      if (provider === 'chatgpt2api') {
+        const generated = await requestChatGPT2APIImage({
+          model: text(node.config.model || 'gpt-image-2'),
+          prompt,
+          references: inputs.image,
+        })
+        return {
+          image: {
+            type: 'image',
+            value: { url: generated.url },
+            metadata: {
+              provider,
+              model: text(node.config.model || 'gpt-image-2'),
+              revisedPrompt: generated.revisedPrompt,
+              referenceAssetIds: inputs.image?.map((item) => item.assetId).filter(Boolean),
+            },
+          },
+        }
+      }
       const apiKey = requireSecret('APP_OPENAI_API_KEY')
       const ratio = text(node.config.aspectRatio)
       const size = ratio === '16:9' ? '1792x1024' : ratio === '9:16' ? '1024x1792' : '1024x1024'
@@ -733,6 +849,25 @@ async function executeNode(
       }
     }
     case 'ai.edit-image': {
+      if (node.config.provider === 'chatgpt2api') {
+        const generated = await requestChatGPT2APIImage({
+          model: text(node.config.model || 'gpt-image-2'),
+          prompt: text(inputs.prompt?.[0]?.value || node.config.prompt),
+          references: inputs.image,
+        })
+        return {
+          image: {
+            type: 'image',
+            value: { url: generated.url },
+            metadata: {
+              provider: 'chatgpt2api',
+              model: text(node.config.model || 'gpt-image-2'),
+              revisedPrompt: generated.revisedPrompt,
+              referenceAssetIds: inputs.image?.map((item) => item.assetId).filter(Boolean),
+            },
+          },
+        }
+      }
       const apiKey = requireSecret('APP_OPENAI_API_KEY')
       const source = await fetch(absoluteMediaURL(inputs.image[0].value))
       if (!source.ok) throw new Error('Could not download the source image for editing.')
