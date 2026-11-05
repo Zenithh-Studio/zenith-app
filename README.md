@@ -1,10 +1,34 @@
 # Znith AI Workflow Studio
 
-Znith Studio is a visual workspace for authoring, validating, and running AI workflows. It combines a ReactFlow editor with a Payload-backed content layer and server-side provider adapters.
+Znith Studio is a visual workspace for authoring, validating, and running AI workflows. It combines a React Flow editor with a self-hosted Payload CMS, PostgreSQL, and server-side provider adapters.
+
+## Run the app with Docker
+
+Requirements: Docker Engine and the Docker Compose plugin.
+
+```bash
+docker compose up -d --build
+```
+
+Open [http://localhost:3001](http://localhost:3001) for the studio. Open [http://localhost:3001/admin](http://localhost:3001/admin) to create the first Payload administrator and manage workflows, executions, and media. The app creates a persistent Payload secret on first startup. Set `APP_PORT=3000` if that host port is free.
+
+The database is available to host tools at `127.0.0.1:55432`; the app connects to it over the private Compose network. PostgreSQL data, uploaded files, and the generated secret are kept in named Docker volumes.
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose down
+```
+
+`docker compose down` stops containers and preserves data. `docker compose down -v` permanently deletes the database, uploads, and generated secret.
+
+For self-hosting, copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, the matching `DATABASE_URL`, `SITE_URL`, and optionally `PAYLOAD_SECRET` before building. Use a strong URL-safe PostgreSQL password and a long random Payload secret. `SITE_URL` is a build argument, so rebuild after changing it. Put the app behind HTTPS and back up the database and the `payload-uploads` and `payload-secrets` volumes.
+
+Existing records in a separate CMS are not copied by this setup. Export and import them separately if you need to preserve them.
 
 ## Monorepo
 
-The repository is a pnpm workspace. The root Next.js application is the Figma Make deployment adapter; its App Router files stay at the root so Payload Admin, the generated Payload routes, and the Make lifecycle continue to use their supported layout.
+The repository is a pnpm workspace. The root Next.js application owns the App Router and Payload Admin/API routes.
 
 | Workspace               | Responsibility                                                                                     |
 | ----------------------- | -------------------------------------------------------------------------------------------------- |
@@ -12,29 +36,22 @@ The repository is a pnpm workspace. The root Next.js application is the Figma Ma
 | `be/`                   | Workflow and asset use cases, Payload repositories, provider execution, and collection definitions |
 | `packages/contracts/`   | Shared workflow types, Zod request contracts, node registry, provider catalog, and templates       |
 | `packages/utils/`       | Reusable, framework-independent helpers                                                            |
-| `src/app/`              | Thin Next.js route adapters and the generated Payload Admin/API routes                             |
-| `src/payload.config.ts` | Figma Payload composition root and automatic type-generation target                                |
+| `src/app/`              | Next.js route adapters and generated Payload Admin/API routes                                      |
+| `src/payload.config.ts` | Payload config, PostgreSQL adapter, and collection registration                                    |
+| `docker-compose.yml`    | App and database services with persistent storage                                                  |
 
-The frontend and backend packages use clean boundaries: App Router handlers translate HTTP requests, application services coordinate use cases, repository ports define persistence needs, and Payload adapters implement those ports. Shared contracts stay independent of React and Payload.
+App Router handlers validate HTTP requests, application services coordinate use cases, repository ports define persistence needs, and Payload adapters implement those ports. Shared contracts stay independent of React and Payload.
 
-## Requirements
+## Local development without Docker
 
-- Node.js `24.22.1`
-- pnpm `10.x`
-- A Figma Make runtime for Payload-backed local development and production builds
-
-## Development
-
-Figma Make manages the development server on `$PORT`.
+Requirements: Node.js `24.22.1` and pnpm `10.x`.
 
 ```bash
 pnpm install
-pnpm test
-pnpm typecheck
-pnpm format:check
+pnpm dev
 ```
 
-To start the app outside the Make host, run `pnpm dev`. Payload/Figma platform configuration is injected by the Make lifecycle; do not add local database adapters or placeholder secrets.
+Set `DATABASE_URL` and `PAYLOAD_SECRET` in `.env` first, and make sure PostgreSQL is running. When using the Compose database from the host, use `localhost:55432` in `DATABASE_URL` instead of the service hostname `database`. Development mode uses Payload's schema push for the local database. Production deployments use the committed Payload migrations.
 
 ## Product capabilities
 
@@ -43,20 +60,14 @@ To start the app outside the Make host, run `pnpm dev`. Payload/Figma platform c
 - Validate acyclic dependencies and execute ready nodes concurrently with retry and timeout policies.
 - Persist execution snapshots, node outputs, status, logs, and errors in Payload.
 - Upload and reuse media from the Payload Media collection.
-- Configure server-side provider credentials through Make settings → Secrets.
-
-## Provider configuration
-
-Provider credentials are read only in backend code. For example, the OpenAI text adapter reads `APP_OPENAI_API_KEY`. Set provider secrets in the platform environment-variable flow; never commit them or place them in workflow definitions.
+- Configure provider credentials with server-only environment variables such as `APP_OPENAI_API_KEY`.
 
 Image and video generation requires a compatible provider and model configuration. Output nodes currently preserve the provider's output reference and filename metadata; persistent media ingestion is a separate storage capability.
 
 ## Quality and releases
 
-`pnpm verify` runs formatting checks, TypeScript checks, and unit tests. GitHub Actions runs the same checks on pushes and pull requests. Production Payload builds and `figma make verify-deploy` remain Make-host checks because they need platform-provisioned backend configuration.
+`pnpm verify` runs formatting checks, TypeScript checks, and unit tests. GitHub Actions runs the same checks on pushes and pull requests. Use `docker compose up -d --build` to build and run the production container stack locally.
 
-Use `pnpm changeset` for user-visible changes. Changeset entries select `patch`, `minor`, or `major` and use release notes beginning with labels such as `Added:`, `Changed:`, or `Fixed:`. The release workflow updates package versions and changelogs in a release pull request.
+Use `pnpm changeset` for user-visible changes. Changeset entries select `patch`, `minor`, or `major` and use release notes beginning with labels such as `Added:`, `Changed:`, or `Fixed:`.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [docs/architecture.md](docs/architecture.md).
-
-For the product, data, device, and cleanup assessment, see [docs/project-assessment.md](docs/project-assessment.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [docs/architecture.md](docs/architecture.md). For the product, data, device, and cleanup assessment, see [docs/project-assessment.md](docs/project-assessment.md).

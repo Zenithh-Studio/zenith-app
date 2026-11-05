@@ -14,4 +14,4 @@ Maintainers will acknowledge reports, investigate them, coordinate a fix, and de
 
 ## Deployment notes
 
-Provider keys must stay in server-only environment variables. Payload/Figma platform configuration is managed by the Make runtime and must not be copied into source control, client bundles, or issue reports.
+Provider keys and `PAYLOAD_SECRET` must stay in server-only environment variables. Do not commit `.env` files. Restrict the database to the private Docker network or loopback, use HTTPS for public deployments, and back up PostgreSQL data and uploaded media.

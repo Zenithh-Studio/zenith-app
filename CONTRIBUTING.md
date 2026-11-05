@@ -1,12 +1,12 @@
 # Contributing
 
-Thanks for helping improve Znith Studio. Keep changes focused, preserve the Figma Make integration contracts, and include tests for behavior changes.
+Thanks for helping improve Znith Studio. Keep changes focused and include tests for behavior changes.
 
 ## Development setup
 
 1. Install Node.js `24.22.1` and pnpm `10.x`.
 2. Run `pnpm install` from the repository root.
-3. Use the Figma Make host for Payload-backed development. The platform provides the Payload backend configuration and secrets.
+3. Start the app and PostgreSQL with `docker compose up -d --build`, or provide a local PostgreSQL database plus `DATABASE_URL` and `PAYLOAD_SECRET` for `pnpm dev`.
 
 ## Workspace conventions
 
@@ -14,8 +14,8 @@ Thanks for helping improve Znith Studio. Keep changes focused, preserve the Figm
 - Put use cases, domain ports, Payload adapters, and provider execution in `be/`.
 - Put cross-workspace DTOs, schemas, registry data, and templates in `packages/contracts/`.
 - Put pure, reusable helpers in `packages/utils/`.
-- Keep Next.js route files thin and preserve generated Payload files under `src/app/(payload)/`.
-- Keep Payload access checks enabled in user-facing Local API calls. Do not introduce a database adapter, placeholder secrets, or hand-written migrations for the Make-managed backend.
+- Keep Next.js route files thin and preserve generated Payload files under `src/app/(payload)/`. Regenerate the import map through the Payload CLI rather than editing it directly.
+- Keep Payload access checks enabled in user-facing Local API calls. Use the PostgreSQL adapter and committed migrations for persistence.
 
 ## Checks
 
@@ -27,7 +27,7 @@ pnpm typecheck
 pnpm test
 ```
 
-Add or update unit tests for domain, use-case, validation, and utility behavior. Production route verification that depends on the Figma Make backend must run in the Make environment.
+Add or update unit tests for domain, use-case, validation, and utility behavior. Verify container changes with `docker compose up -d --build` and `docker compose ps`.
 
 ## Commit messages
 
@@ -49,7 +49,7 @@ Add a changeset for package behavior or documentation changes that should appear
 pnpm changeset
 ```
 
-Choose `patch` for compatible fixes, `minor` for backward-compatible features, and `major` for breaking contract changes. Write concise release notes with a category prefix such as `Added:`, `Changed:`, or `Fixed:`. The release workflow generates package versions and changelogs from committed changesets.
+Choose `patch` for compatible fixes, `minor` for backward-compatible features, and `major` for breaking contract changes. Write concise release notes with a category prefix such as `Added:`, `Changed:`, or `Fixed:`.
 
 ## Pull requests
 

@@ -22,7 +22,7 @@
 
 - 98dc262: Added: Established reusable frontend, backend, contracts, and utility workspaces.
 
-  Changed: Kept the Figma Make integration at the root and moved application modules behind explicit package boundaries.
+  Changed: Kept the Next.js deployment shell at the root and moved application modules behind explicit package boundaries.
 
 ### Patch Changes
 

@@ -8,14 +8,11 @@ build/
 next-env.d.ts
 *.tsbuildinfo
 coverage/
-.figma/make/template-transition.json
 *-debug.log*
 logs/
 *.log
 .claude-replay.*
-.figma/runtime/
 .tmp-*
-/.figma/design-context/
 
 # Platform-managed agentplat state, not project source. In the
 # client-initiated single-repo workspace layout (make's `Path: "."` spec) the
