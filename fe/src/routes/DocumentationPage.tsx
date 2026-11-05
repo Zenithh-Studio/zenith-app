@@ -39,7 +39,7 @@ export function DocumentationPage() {
             [
               ShieldCheck,
               'Configure credentials',
-              'Provider keys stay in Make settings → Secrets and are never written into workflow exports or browser code.',
+              'Provider keys come from server environment variables and are never written into workflow exports or browser code.',
             ],
           ].map(([Icon, title, detail]) => (
             <section

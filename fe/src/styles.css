@@ -42,11 +42,7 @@
   border-bottom: 1px solid #e4e4e7 !important;
 }
 
-.figma-custom-code-fragment {
-  display: contents;
-}
-
-.figma-bypass-link {
+.skip-link {
   position: fixed;
   top: 8px;
   left: 8px;
@@ -62,6 +58,6 @@
   text-decoration: none;
 }
 
-.figma-bypass-link:focus {
+.skip-link:focus {
   transform: translateY(0);
 }

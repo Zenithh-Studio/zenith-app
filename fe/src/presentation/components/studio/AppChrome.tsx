@@ -59,7 +59,7 @@ export function Sidebar({ active = 'workflows' }: { active?: 'workflows' | 'asse
             <span className="block truncate text-xs font-medium text-zinc-800">
               Local workspace
             </span>
-            <span className="block text-[11px] text-zinc-400">Payload connected</span>
+            <span className="block text-[11px] text-zinc-400">PostgreSQL database</span>
           </span>
           <ChevronDown size={14} className="text-zinc-400" />
         </a>
