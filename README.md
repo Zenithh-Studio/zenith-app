@@ -63,8 +63,11 @@ Set `DATABASE_URL` and `PAYLOAD_SECRET` in `.env` first, and make sure PostgreSQ
 - Upload and reuse media from the Payload Media collection.
 - Configure provider credentials with server-only environment variables such as `APP_OPENAI_API_KEY`.
 - Image generation can use ChatGPT2API through `APP_CHATGPT2API_BASE_URL` and `APP_CHATGPT2API_API_KEY` in `.env`.
+- Video generation can use Muse2API for text-to-video or first-frame image-to-video. The app submits and polls asynchronous tasks, then saves completed output to Assets.
 
-Image and video generation requires a compatible provider and model configuration. Output nodes currently preserve the provider's output reference and filename metadata; persistent media ingestion is a separate storage capability.
+Muse2API is a third-party gateway to the muse.ai web app, not an official Meta video API. Run it separately, configure `APP_MUSE2API_BASE_URL` to its `/v1` endpoint, and set `APP_MUSE2API_API_KEY` in `.env`. For Docker, use `http://host.docker.internal:18610/v1` when the gateway listens on the host, or the gateway's service name when both containers share a network. The upstream project currently marks its browser driver as needing live tests with a real muse.ai account; see the [Muse2API setup guide](https://github.com/www222fff/muse2api#quick-start) before configuring an account.
+
+Image and video generation requires a compatible provider and model configuration. Generated media is copied to Payload Assets when the provider returns a downloadable URL.
 
 ## Quality and releases
 
