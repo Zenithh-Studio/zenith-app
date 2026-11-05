@@ -1,14 +1,23 @@
 import path from 'path'
-import { buildFigmaConfig } from '@payloadcms/figma'
+import { postgresAdapter } from '@payloadcms/db-postgres'
 import { mcpPlugin } from '@payloadcms/plugin-mcp'
 import { en as adminLanguage } from '@payloadcms/translations/languages/en'
+import { buildConfig } from 'payload'
 import { fileURLToPath } from 'url'
 import { Admins, Executions, Folders, Media, Tags, Workflows } from '@znith/be/collections'
+import { migrations } from './migrations'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
 
-export default buildFigmaConfig({
+export default buildConfig({
+  secret: process.env.PAYLOAD_SECRET ?? '',
+  db: postgresAdapter({
+    pool: { connectionString: process.env.DATABASE_URL ?? '' },
+    idType: 'uuid',
+    migrationDir: path.resolve(dirname, 'migrations'),
+    prodMigrations: migrations,
+  }),
   admin: {
     user: Admins.slug,
     constrainWidth: true,
@@ -37,5 +46,4 @@ export default buildFigmaConfig({
     defaultLocale: 'en',
   },
   plugins: [mcpPlugin({})],
-  figma: {},
 })
