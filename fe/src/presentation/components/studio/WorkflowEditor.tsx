@@ -902,9 +902,13 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     setDirty(true)
   }
 
-  const updateConfig = (key: string, value: unknown) => {
+  const updateConfigMany = (patch: Record<string, unknown>) => {
     if (!selectedNode) return
-    updateSelected({ config: { ...selectedNode.data.workflowNode.config, [key]: value } })
+    updateSelected({ config: { ...selectedNode.data.workflowNode.config, ...patch } })
+  }
+
+  const updateConfig = (key: string, value: unknown) => {
+    updateConfigMany({ [key]: value })
   }
 
   const updateTextNodeValue = useCallback(
@@ -1442,6 +1446,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                       type={selectedNode.data.workflowNode.type}
                       config={selectedNode.data.workflowNode.config}
                       onChange={updateConfig}
+                      onChangeMany={updateConfigMany}
                       onUpload={() => {
                         uploadTarget.current = 'selected'
                         mediaInput.current?.click()
@@ -1461,9 +1466,12 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                               const provider = providersFor('text').find(
                                 (item) => item.id === event.target.value,
                               )
-                              updateConfig('provider', event.target.value)
-                              if (provider?.models.text?.[0])
-                                updateConfig('model', provider.models.text[0])
+                              updateConfigMany({
+                                provider: event.target.value,
+                                ...(provider?.models.text?.[0]
+                                  ? { model: provider.models.text[0] }
+                                  : {}),
+                              })
                             }}
                             className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs outline-none"
                           >
@@ -1807,11 +1815,13 @@ function MediaConfiguration({
   type,
   config,
   onChange,
+  onChangeMany,
   onUpload,
 }: {
   type: string
   config: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
+  onChangeMany: (patch: Record<string, unknown>) => void
   onUpload: () => void
 }) {
   const isInput = type === 'input.image' || type === 'input.video'
@@ -1865,9 +1875,11 @@ function MediaConfiguration({
               value={String(config.provider || providers[0]?.id || '')}
               onChange={(event) => {
                 const provider = providers.find((item) => item.id === event.target.value)
-                onChange('provider', event.target.value)
                 const defaultModel = provider?.models[modality]?.[0]
-                if (defaultModel) onChange('model', defaultModel)
+                onChangeMany({
+                  provider: event.target.value,
+                  ...(defaultModel ? { model: defaultModel } : {}),
+                })
               }}
               className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs outline-none"
             >
