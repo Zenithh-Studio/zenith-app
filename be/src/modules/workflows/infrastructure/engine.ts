@@ -106,7 +106,7 @@ const absoluteMediaURL = (value: unknown) => {
   if (!url) return ''
   return new URL(
     url,
-    process.env.FIGMA_PUBLIC_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://127.0.0.1:3000',
+    process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://127.0.0.1:3000',
   ).toString()
 }
 
@@ -120,7 +120,7 @@ function requireSecret(
   const value = process.env[name]
   if (!value)
     throw new Error(
-      `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Add ${name} in Make settings → Secrets.`,
+      `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Set the ${name} server environment variable.`,
     )
   return value
 }
