@@ -58,7 +58,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { nodeRegistry, providersFor, registryByType } from '@znith/contracts'
 import type {
   ExecutionDocument,
@@ -76,6 +76,13 @@ type StudioNodeData = {
   record?: NodeExecutionRecord
 }
 type StudioNode = Node<StudioNodeData, 'studioNode'>
+
+type TextNodeEditorContextValue = {
+  updateValue: (nodeId: string, value: string) => void
+  finishEditing: (nodeId: string) => void
+}
+
+const TextNodeEditorContext = createContext<TextNodeEditorContextValue | null>(null)
 
 const iconByType: Record<string, typeof FileText> = {
   'input.text': FileText,
@@ -208,6 +215,7 @@ function imageRatioLabel(width: number, height: number) {
 }
 
 function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
+  const textNodeEditor = useContext(TextNodeEditorContext)
   const definition = registryByType.get(data.workflowNode.type)
   const tone = categoryTone[definition?.category ?? 'Utility']
   const Icon = iconByType[data.workflowNode.type] ?? Zap
@@ -333,6 +341,71 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-500">
           <span>@{slug}</span>
           <span>{mediaRatioLabel}</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (data.workflowNode.type === 'input.text' || data.workflowNode.type === 'input.prompt') {
+    const value = String(data.workflowNode.config.value ?? '')
+    const isPrompt = data.workflowNode.type === 'input.prompt'
+
+    return (
+      <div
+        className={`relative w-[352px] rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+      >
+        <TypedHandles definition={definition} />
+        <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
+          <span className={`grid size-8 place-items-center rounded-xl ${tone.icon}`}>
+            <Icon size={15} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-zinc-900">
+              {data.workflowNode.name}
+            </div>
+            <div className="text-[10px] text-zinc-400">@{slug}</div>
+          </div>
+          {record?.status === 'running' ? (
+            <LoaderCircle size={15} className="animate-spin text-violet-600" />
+          ) : record?.status === 'succeeded' ? (
+            <Check size={15} className="text-emerald-600" />
+          ) : record?.status === 'failed' ? (
+            <CircleAlert size={15} className="text-rose-600" />
+          ) : (
+            <GripVertical size={15} className="text-zinc-300" />
+          )}
+        </div>
+        <div className="p-3.5 pb-2.5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              {isPrompt ? 'Prompt content' : 'Text content'}
+            </span>
+            <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-medium text-zinc-500">
+              {isPrompt ? 'Reusable prompt' : 'Plain text'}
+            </span>
+          </div>
+          <textarea
+            aria-label={`${data.workflowNode.name} content`}
+            className="nodrag nowheel min-h-[184px] max-h-[360px] w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs leading-[1.65] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-50"
+            placeholder={
+              isPrompt
+                ? 'Write a reusable prompt or creative brief…'
+                : 'Enter text to pass to connected nodes…'
+            }
+            rows={8}
+            value={value}
+            onChange={(event) =>
+              textNodeEditor?.updateValue(data.workflowNode.id, event.target.value)
+            }
+            onBlur={() => textNodeEditor?.finishEditing(data.workflowNode.id)}
+          />
+        </div>
+        <div className="flex items-center justify-between border-t border-zinc-100 px-3.5 py-2.5 text-[10px] text-zinc-400">
+          <span className="inline-flex items-center gap-1.5">
+            <Type size={12} />
+            {definition?.outputs.length ?? 0} text output
+          </span>
+          <span>{Array.from(value).length.toLocaleString()} characters</span>
         </div>
       </div>
     )
@@ -487,6 +560,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const uploadTarget = useRef<'new' | 'selected'>('new')
   const undoStack = useRef<WorkflowDefinition[]>([])
   const redoStack = useRef<WorkflowDefinition[]>([])
+  const textEditHistoryCaptured = useRef(new Set<string>())
   const clipboard = useRef<{ nodes: WorkflowNode[]; edges: WorkflowEdge[] } | null>(null)
   const { fitView, screenToFlowPosition } = useReactFlow()
 
@@ -610,6 +684,9 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     ? registryByType.get(selectedNode.data.workflowNode.type)
     : undefined
   const latestExecution = executions[0]
+  const isTextInputNode = Boolean(
+    selectedNode && ['input.text', 'input.prompt'].includes(selectedNode.data.workflowNode.type),
+  )
   const isMediaConfiguration = Boolean(
     selectedNode &&
     [
@@ -825,6 +902,42 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     if (!selectedNode) return
     updateSelected({ config: { ...selectedNode.data.workflowNode.config, [key]: value } })
   }
+
+  const updateTextNodeValue = useCallback(
+    (nodeId: string, value: string) => {
+      if (!textEditHistoryCaptured.current.has(nodeId)) {
+        captureHistory()
+        textEditHistoryCaptured.current.add(nodeId)
+      }
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  workflowNode: {
+                    ...node.data.workflowNode,
+                    config: { ...node.data.workflowNode.config, value },
+                  },
+                },
+              }
+            : node,
+        ),
+      )
+      setDirty(true)
+    },
+    [captureHistory, setNodes],
+  )
+
+  const finishTextNodeEditing = useCallback((nodeId: string) => {
+    textEditHistoryCaptured.current.delete(nodeId)
+  }, [])
+
+  const textNodeEditor = useMemo(
+    () => ({ updateValue: updateTextNodeValue, finishEditing: finishTextNodeEditing }),
+    [finishTextNodeEditing, updateTextNodeValue],
+  )
 
   const deleteSelected = () => {
     if (!selectedId) return
@@ -1152,69 +1265,73 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         )}
 
         <section className="relative min-w-0 flex-1">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={(changes) => {
-              onNodesChange(changes)
-              if (changes.some((change) => change.type === 'position' && change.dragging === false))
+          <TextNodeEditorContext.Provider value={textNodeEditor}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={(changes) => {
+                onNodesChange(changes)
+                if (
+                  changes.some((change) => change.type === 'position' && change.dragging === false)
+                )
+                  setDirty(true)
+              }}
+              onEdgesChange={(changes) => {
+                onEdgesChange(changes)
                 setDirty(true)
-            }}
-            onEdgesChange={(changes) => {
-              onEdgesChange(changes)
-              setDirty(true)
-            }}
-            onConnect={connect}
-            onReconnect={reconnect}
-            onNodeDragStart={captureHistory}
-            onNodeClick={(_, node) => {
-              setSelectedId(node.id)
-              setInspectorOpen(true)
-            }}
-            onPaneClick={() => setSelectedId(null)}
-            onPaneContextMenu={(event) => {
-              event.preventDefault()
-              setContextMenu({ x: event.clientX, y: event.clientY })
-              setPickerPosition(screenToFlowPosition({ x: event.clientX, y: event.clientY }))
-            }}
-            onNodesDelete={(deleted) => {
-              const ids = new Set(deleted.map((node) => node.id))
-              setEdges((current) =>
-                current.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
-              )
-              setDirty(true)
-            }}
-            onEdgesDelete={() => {
-              captureHistory()
-              setDirty(true)
-            }}
-            fitView
-            minZoom={0.2}
-            maxZoom={1.8}
-            defaultEdgeOptions={{
-              type: 'bezier',
-              style: { stroke: '#8b5cf6', strokeWidth: 2 },
-            }}
-            connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
-            deleteKeyCode={['Backspace', 'Delete']}
-            multiSelectionKeyCode={['Meta', 'Control']}
-            selectionOnDrag
-          >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#d4d4d8" />
-            <Controls
-              position="bottom-left"
-              className="!m-4 !overflow-hidden !rounded-xl !border-zinc-200 !shadow-lg"
-            />
-            <MiniMap
-              position="bottom-right"
-              className="!m-4 !rounded-xl !border !border-zinc-200 !bg-white !shadow-lg"
-              nodeColor="#8b5cf6"
-              maskColor="rgba(244,244,245,.72)"
-              pannable
-              zoomable
-            />
-          </ReactFlow>
+              }}
+              onConnect={connect}
+              onReconnect={reconnect}
+              onNodeDragStart={captureHistory}
+              onNodeClick={(_, node) => {
+                setSelectedId(node.id)
+                setInspectorOpen(true)
+              }}
+              onPaneClick={() => setSelectedId(null)}
+              onPaneContextMenu={(event) => {
+                event.preventDefault()
+                setContextMenu({ x: event.clientX, y: event.clientY })
+                setPickerPosition(screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+              }}
+              onNodesDelete={(deleted) => {
+                const ids = new Set(deleted.map((node) => node.id))
+                setEdges((current) =>
+                  current.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
+                )
+                setDirty(true)
+              }}
+              onEdgesDelete={() => {
+                captureHistory()
+                setDirty(true)
+              }}
+              fitView
+              minZoom={0.2}
+              maxZoom={1.8}
+              defaultEdgeOptions={{
+                type: 'bezier',
+                style: { stroke: '#8b5cf6', strokeWidth: 2 },
+              }}
+              connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
+              deleteKeyCode={['Backspace', 'Delete']}
+              multiSelectionKeyCode={['Meta', 'Control']}
+              selectionOnDrag
+            >
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#d4d4d8" />
+              <Controls
+                position="bottom-left"
+                className="!m-4 !overflow-hidden !rounded-xl !border-zinc-200 !shadow-lg"
+              />
+              <MiniMap
+                position="bottom-right"
+                className="!m-4 !rounded-xl !border !border-zinc-200 !bg-white !shadow-lg"
+                nodeColor="#8b5cf6"
+                maskColor="rgba(244,244,245,.72)"
+                pannable
+                zoomable
+              />
+            </ReactFlow>
+          </TextNodeEditorContext.Provider>
           <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-[10px] font-medium text-zinc-500 shadow-sm backdrop-blur">
             {nodes.length} nodes · {edges.length} connections
           </div>
@@ -1304,6 +1421,11 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                   )}
                 </InspectorSection>
                 <InspectorSection title="Configuration">
+                  {isTextInputNode && (
+                    <p className="mb-3 rounded-xl bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-500">
+                      Edit the content directly on the node card in the canvas.
+                    </p>
+                  )}
                   {(selectedNode.data.workflowNode.type === 'ai.generate-text' ||
                     selectedNode.data.workflowNode.type.startsWith('ai.')) && (
                     <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-800">
@@ -1321,7 +1443,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                         mediaInput.current?.click()
                       }}
                     />
-                  ) : Object.entries(selectedNode.data.workflowNode.config).length ? (
+                  ) : isTextInputNode ? null : Object.entries(selectedNode.data.workflowNode.config)
+                      .length ? (
                     Object.entries(selectedNode.data.workflowNode.config).map(([key, value]) => (
                       <label key={key} className="mb-3 block">
                         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
