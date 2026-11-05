@@ -24,7 +24,7 @@ docker compose down
 
 `docker compose down` stops containers and preserves data. `docker compose down -v` permanently deletes the database, uploads, and generated secret.
 
-For self-hosting, copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, the matching `DATABASE_URL`, `SITE_URL`, and optionally `PAYLOAD_SECRET` before building. Use a strong URL-safe PostgreSQL password and a long random Payload secret. `SITE_URL` is a build argument, so rebuild after changing it. Put the app behind HTTPS and back up the database and the `payload-uploads` and `payload-secrets` volumes.
+For self-hosting, copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `SITE_URL`, and optionally `PAYLOAD_SECRET` before building. Compose constructs the app's internal database URL from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`; set `APP_DATABASE_URL` only when the app should use an external PostgreSQL server. Use a strong URL-safe PostgreSQL password and a long random Payload secret. `SITE_URL` is a build argument, so rebuild after changing it. Put the app behind HTTPS and back up the database and the `payload-uploads` and `payload-secrets` volumes.
 
 Existing records in a separate CMS are not copied by this setup. Export and import them separately if you need to preserve them.
 
