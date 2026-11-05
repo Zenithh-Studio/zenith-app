@@ -10,11 +10,11 @@ Thanks for helping improve Znith Studio. Keep changes focused and include tests 
 
 ## Workspace conventions
 
-- Put browser-facing features and presentation in `fe/`.
-- Put use cases, domain ports, Payload adapters, and provider execution in `be/`.
+- Put browser-facing features and presentation in `apps/studio/src/features/`.
+- Put use cases, domain ports, Payload adapters, and provider execution in `apps/studio/src/server/`.
 - Put cross-workspace DTOs, schemas, registry data, and templates in `packages/contracts/`.
 - Put pure, reusable helpers in `packages/utils/`.
-- Keep Next.js route files thin and preserve generated Payload files under `src/app/(payload)/`. Regenerate the import map through the Payload CLI rather than editing it directly.
+- Keep Next.js route files thin and preserve generated Payload files under `apps/studio/src/app/(payload)/`. Regenerate the import map through the Payload CLI rather than editing it directly.
 - Keep Payload access checks enabled in user-facing Local API calls. Use the PostgreSQL adapter and committed migrations for persistence.
 
 ## Checks
@@ -22,6 +22,8 @@ Thanks for helping improve Znith Studio. Keep changes focused and include tests 
 Run the checks that match your change before opening a pull request:
 
 ```bash
+pnpm format
+pnpm lint
 pnpm format:check
 pnpm typecheck
 pnpm test
@@ -34,22 +36,16 @@ Add or update unit tests for domain, use-case, validation, and utility behavior.
 Use Conventional Commits with a module scope when practical:
 
 ```text
-feat(be/workflows): add workflow retry policy
-fix(fe/editor): preserve selected node after save
+feat(studio/workflows): add workflow retry policy
+fix(studio/editor): preserve selected node after save
 docs(repo): describe workspace boundaries
 ```
 
 Husky checks formatting, types, tests, and the commit message before recording a commit.
 
-## Changesets
+## Release notes
 
-Add a changeset for package behavior or documentation changes that should appear in release notes:
-
-```bash
-pnpm changeset
-```
-
-Choose `patch` for compatible fixes, `minor` for backward-compatible features, and `major` for breaking contract changes. Write concise release notes with a category prefix such as `Added:`, `Changed:`, or `Fixed:`.
+Use Conventional Commits with a module scope for user-visible changes. Release Please reads commits merged to `main`, opens a release pull request, and updates the single project-wide `CHANGELOG.md`. Keep release history in that root file; do not add package-specific changelogs.
 
 ## Pull requests
 

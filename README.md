@@ -30,17 +30,16 @@ Existing records in a separate CMS are not copied by this setup. Export and impo
 
 ## Monorepo
 
-The repository is a pnpm workspace. The root Next.js application owns the App Router and Payload Admin/API routes.
+The repository is a pnpm monorepo. `apps/studio/` is the Next.js application and owns the App Router and Payload Admin/API routes.
 
-| Workspace               | Responsibility                                                                                     |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `fe/`                   | Frontend presentation, route components, and browser interactions                                  |
-| `be/`                   | Workflow and asset use cases, Payload repositories, provider execution, and collection definitions |
-| `packages/contracts/`   | Shared workflow types, Zod request contracts, node registry, provider catalog, and templates       |
-| `packages/utils/`       | Reusable, framework-independent helpers                                                            |
-| `src/app/`              | Next.js route adapters and generated Payload Admin/API routes                                      |
-| `src/payload.config.ts` | Payload config, PostgreSQL adapter, and collection registration                                    |
-| `docker-compose.yml`    | App and database services with persistent storage                                                  |
+| Workspace                 | Responsibility                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `apps/studio/`            | Next.js app, frontend features, server modules, and Payload configuration                    |
+| `packages/contracts/`     | Shared workflow types, Zod request contracts, node registry, provider catalog, and templates |
+| `packages/utils/`         | Reusable, framework-independent helpers                                                      |
+| `apps/studio/src/app/`    | Next.js route adapters and generated Payload Admin/API routes                                |
+| `apps/studio/src/server/` | Workflow and asset use cases, Payload repositories, provider execution, and collections      |
+| `docker-compose.yml`      | App and database services with persistent storage                                            |
 
 App Router handlers validate HTTP requests, application services coordinate use cases, repository ports define persistence needs, and Payload adapters implement those ports. Shared contracts stay independent of React and Payload.
 
@@ -69,8 +68,8 @@ Image and video generation requires a compatible provider and model configuratio
 
 ## Quality and releases
 
-`pnpm verify` runs formatting checks, TypeScript checks, and unit tests. GitHub Actions runs the same checks on pushes and pull requests. Use `docker compose up -d --build` to build and run the production container stack locally.
+`pnpm verify` runs Prettier checks, ESLint, TypeScript checks, and unit tests. GitHub Actions runs the same checks on pushes and pull requests. Use `docker compose up -d --build` to build and run the production container stack locally.
 
-Use `pnpm changeset` for user-visible changes. Changeset entries select `patch`, `minor`, or `major` and use release notes beginning with labels such as `Added:`, `Changed:`, or `Fixed:`.
+Release Please reads Conventional Commits on `main`, opens a release pull request, and updates the project-wide [CHANGELOG.md](CHANGELOG.md). Release history is kept in that root file.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [docs/architecture.md](docs/architecture.md). For the product, data, device, and cleanup assessment, see [docs/project-assessment.md](docs/project-assessment.md).

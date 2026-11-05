@@ -5,10 +5,10 @@ React, Next.js, Payload CMS, PostgreSQL, and Tailwind CSS application packaged f
 ## Working instructions
 
 - Use the Payload framework guidance available in the workspace when working on Payload configuration, collections, access, or migrations.
-- Read the installed Next.js documentation under `node_modules/next/dist/docs/` before changing routes, pages, components, caching, images, or metadata.
+- Read the installed Next.js documentation under `apps/studio/node_modules/next/dist/docs/` before changing routes, pages, components, caching, images, or metadata.
 - For user-facing document mutations, validate and allowlist every submitted field on the server and return structured errors the UI can display.
 - User-facing Payload Local API calls must set `overrideAccess: false` and pass the authenticated user when one exists.
-- Preserve the document ID type generated in `src/payload-types.ts`; do not assume IDs are numeric.
+- Preserve the document ID type generated in `apps/studio/src/payload-types.ts`; do not assume IDs are numeric.
 - Protect server-owned workflow fields with field-level create/update access and enforce durable relationship rules at the collection boundary.
 - Model durable records, uploads, and admin-managed content in Payload. Use the Payload CLI for data operations.
 - Keep provider keys, `PAYLOAD_SECRET`, and database credentials server-side. Never put private values in client bundles, workflow exports, source control, or logs.
@@ -23,17 +23,19 @@ For Payload-managed images, pass the upload URL (`media.url`) to `next/image`. K
 
 ## Project structure
 
-This repository is a pnpm workspace with a root Next.js application:
+This repository is a pnpm monorepo:
 
-- `fe/` - Frontend presentation components, route views, and styles
-- `be/` - Backend application services, domain ports, Payload adapters, providers, and collections
+- `apps/studio/` - Next.js and Payload application, its routes, server modules, frontend features, and migrations
+- `apps/studio/src/features/studio/` - Studio presentation, route views, shared layout, and styles
+- `apps/studio/src/server/` - Collections, domain ports, application services, persistence adapters, and workflow engine
+- `apps/studio/src/app/(frontend)/` - Next.js pages and API route adapters
+- `apps/studio/src/app/(payload)/` - Generated Payload Admin and API routes; do not hand-edit
+- `apps/studio/src/payload.config.ts` - Payload/PostgreSQL composition root
+- `apps/studio/src/payload-types.ts` - Automatically generated TypeScript types
+- `apps/studio/src/migrations/` - Payload database migrations
 - `packages/contracts/` - Shared workflow schemas, types, registry, provider catalog, and templates
 - `packages/utils/` - Framework-independent shared utilities
-- `src/app/(frontend)/` - Next.js pages and API route adapters
-- `src/app/(payload)/` - Generated Payload Admin and API routes; do not hand-edit
-- `src/payload.config.ts` - Payload/PostgreSQL composition root
-- `src/payload-types.ts` - Automatically generated TypeScript types
-- `src/migrations/` - Payload database migrations
+- `CHANGELOG.md` - Project-wide release history; do not add package-specific changelogs
 - `Dockerfile` and `docker-compose.yml` - App and PostgreSQL services
 
 ## Styling
@@ -48,7 +50,7 @@ Use the lightest stack that satisfies the request:
 - Server-side compute, secrets, OAuth, email, webhooks, or third-party API calls without durable local data: Next.js server components, actions, or route handlers.
 - Durable records, uploads, users, or admin-managed content: Payload CMS with the PostgreSQL adapter.
 
-Use `buildConfig()` and `postgresAdapter()` in `src/payload.config.ts`. Store upload files in the configured uploads directory. Keep the database, upload, and signing-secret volumes persistent. Use local schema push during development and committed migrations for production deployments.
+Use `buildConfig()` and `postgresAdapter()` in `apps/studio/src/payload.config.ts`. Store upload files in the configured uploads directory. Keep the database, upload, and signing-secret volumes persistent. Use local schema push during development and committed migrations for production deployments.
 
 Do not hand-edit Payload generated files. Regenerate types and the Admin import map with the Payload CLI when the config changes.
 
@@ -70,7 +72,7 @@ Before changing an existing Payload schema, classify the change:
 
 Use relationships for independently managed domain concepts. Model content images as upload relationships to the existing `media` collection. Avoid parallel URL fields or hardcoded frontend media data.
 
-Keep useful empty states and handle absent optional relationships safely. Public detail records normally need a unique indexed slug and should use `findBySlug()` from `src/lib/payload.ts` with `notFound()` for missing documents.
+Keep useful empty states and handle absent optional relationships safely. Public detail records normally need a unique indexed slug and should use `findBySlug()` from `apps/studio/src/lib/payload.ts` with `notFound()` for missing documents.
 
 ## Authentication
 
@@ -92,6 +94,7 @@ PostgreSQL must pass its health check before the app starts. The Payload adapter
 
 - The dev server listens on `$PORT` (default 3000); do not hardcode a development port.
 - Use pnpm to add workspace dependencies and keep `pnpm-lock.yaml` synchronized.
+- Keep release history in the root `CHANGELOG.md`; Release Please builds release notes from Conventional Commits.
 - Toolchain versions are managed by `.mise.toml`.
 - Check `package.json` before adding dependencies. This project uses Next.js App Router, React 19, Payload, and Tailwind CSS v4.
 - Keep environment files out of source control.

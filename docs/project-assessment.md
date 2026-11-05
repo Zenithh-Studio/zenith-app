@@ -8,7 +8,7 @@ The application is a single shared workspace. Public app-user accounts, per-user
 
 ## Non-functional assessment
 
-- **Maintainability:** UI, graph contracts, engine, and collection definitions are separated into presentation, application/domain logic, persistence adapters, and shared contract workspaces.
+- **Maintainability:** UI, graph contracts, engine, and collection definitions are separated into app features, application/domain logic, persistence adapters, and shared contract workspaces.
 - **Reliability:** Workflow definitions are validated and executions keep a snapshot plus node-level results. Unit tests cover the workflow engine, application services, asset validation, contracts, and shared utilities.
 - **Security:** Provider and Payload secrets are server-only. Admin access uses Payload's local authentication. Before adding multi-user access, define app-user ownership and explicit collection access rules.
 - **Scalability:** Provider calls execute within the request lifecycle today. Long-running or high-volume jobs will need durable queueing/recovery, such as Payload Jobs, before scaling that workload.
@@ -28,9 +28,9 @@ Do not remove Folders or Tags as apparent unused collections: the Media collecti
 - **Backend/content:** Payload CMS 4 with a PostgreSQL adapter and local file uploads.
 - **UI:** Tailwind CSS 4, React Flow, and Lucide icons.
 - **Contracts and validation:** Zod schemas shared by the frontend and backend.
-- **Tooling:** pnpm workspaces, Docker Compose, Vitest, Oxfmt, Husky, Changesets, and GitHub Actions.
+- **Tooling:** pnpm workspaces, Docker Compose, Vitest, Prettier, ESLint, Husky, Release Please, and GitHub Actions.
 - **Target devices:** Modern desktop and mobile web browsers through responsive layouts. No native app, local-device storage layer, or specialized hardware integration was found.
 
 ## Repository cleanup
 
-The source tree separates UI, backend, and contracts into workspace packages. Docker Compose builds the standalone Next.js app and PostgreSQL service together. Payload migrations initialize and evolve the relational schema; named volumes retain uploaded files, database data, and the generated signing secret.
+The source tree keeps app-specific UI and backend modules in `apps/studio/` and shared contracts in workspace packages. Docker Compose builds the standalone Next.js app and PostgreSQL service together. Payload migrations initialize and evolve the relational schema; named volumes retain uploaded files, database data, and the generated signing secret.
