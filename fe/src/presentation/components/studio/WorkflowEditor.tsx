@@ -1765,7 +1765,7 @@ function MediaConfiguration({
           </label>
         </>
       )}
-      {'aspectRatio' in config && (
+      {'aspectRatio' in config && config.provider !== 'chatgpt2api' && (
         <div>
           <span className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Aspect ratio
@@ -1782,6 +1782,11 @@ function MediaConfiguration({
             ))}
           </div>
         </div>
+      )}
+      {'aspectRatio' in config && config.provider === 'chatgpt2api' && (
+        <p className="text-[10px] leading-relaxed text-zinc-400">
+          ChatGPT2API currently chooses image dimensions automatically.
+        </p>
       )}
       {'model' in config && (
         <label className="block">
