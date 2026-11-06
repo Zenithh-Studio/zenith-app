@@ -17,7 +17,7 @@ services:
       retries: 10
 
   chatgpt2api:
-    image: ${CHATGPT2API_IMAGE:-ghcr.io/yukkcat/chatgpt2api:v3.2.3}
+    image: ghcr.io/zenithh-studio/chatgpt2api:v3.2.3-en.1
     restart: unless-stopped
     ports:
       - '127.0.0.1:${CHATGPT2API_PORT:-3000}:80'

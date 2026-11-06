@@ -14,6 +14,7 @@ import {
   MiniMap,
   Node,
   NodeProps,
+  NodeToolbar,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -43,6 +44,7 @@ import {
   Maximize2,
   Menu,
   MessageSquareText,
+  MoreHorizontal,
   PanelLeftClose,
   Play,
   Plus,
@@ -64,6 +66,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { createPortal } from 'react-dom'
 import {
   createContext,
   useCallback,
@@ -92,6 +95,7 @@ type StudioNodeData = {
   record?: NodeExecutionRecord
   executionLogs?: ExecutionLog[]
   mediaVersions?: MediaOutputVersion[]
+  outputStale?: boolean
 }
 type StudioNode = Node<StudioNodeData, 'studioNode'>
 
@@ -119,6 +123,8 @@ type TextNodeEditorContextValue = {
 }
 
 const TextNodeEditorContext = createContext<TextNodeEditorContextValue | null>(null)
+
+const imageAspectRatios = ['9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9']
 
 const iconByType: Record<string, typeof FileText> = {
   'input.text': FileText,
@@ -241,6 +247,14 @@ function mediaSource(value: unknown, assetId?: unknown, fileName?: unknown) {
 }
 
 function imageRatioLabel(width: number, height: number) {
+  const actualRatio = width / height
+  const matchingPreset = imageAspectRatios.find((ratio) => {
+    const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
+    const presetRatio = ratioWidth / ratioHeight
+    return Math.abs(actualRatio - presetRatio) <= presetRatio * 0.01
+  })
+  if (matchingPreset) return matchingPreset
+
   const roundedWidth = Math.round(width)
   const roundedHeight = Math.round(height)
   let a = roundedWidth
@@ -248,6 +262,10 @@ function imageRatioLabel(width: number, height: number) {
   while (b !== 0) [a, b] = [b, a % b]
   const divisor = Math.max(a, 1)
   return `${roundedWidth / divisor}:${roundedHeight / divisor}`
+}
+
+function nextOutputRevision() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function NodeRunIndicator({ status }: { status?: NodeExecutionRecord['status'] }) {
@@ -322,14 +340,47 @@ function mediaOutputURL(output?: import('@znith/contracts').NodeValue) {
   return ''
 }
 
+function isMediaOutputStale(node: WorkflowNode, executions: ExecutionDocument[]) {
+  if (
+    !['ai.generate-image', 'ai.edit-image', 'ai.generate-video', 'ai.image-to-video'].includes(
+      node.type,
+    )
+  ) {
+    return false
+  }
+
+  const latestSuccessfulOutput = [...executions]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .find((execution) => {
+      const record = execution.nodeRecords?.find(
+        (item) => item.nodeId === node.id && item.status === 'succeeded',
+      )
+      return Object.values(record?.outputs ?? {}).some(
+        (output) => output.type === 'image' || output.type === 'video',
+      )
+    })
+  if (!latestSuccessfulOutput) return false
+
+  const executedNode = latestSuccessfulOutput.snapshot.nodes.find((item) => item.id === node.id)
+  const previousRevision = String(executedNode?.config.outputRevision || '')
+  const currentRevision = String(node.config.outputRevision || '')
+  if (previousRevision !== currentRevision) return true
+
+  const previousRatio = String(executedNode?.config.aspectRatio || '')
+  const currentRatio = String(node.config.aspectRatio || '')
+  return previousRatio !== currentRatio
+}
+
 function NodeActionToolbar({
   workflowNode,
   record,
   selected,
+  aspectRatioValue,
 }: {
   workflowNode: WorkflowNode
   record?: NodeExecutionRecord
   selected: boolean
+  aspectRatioValue?: string
 }) {
   const actions = useContext(NodeActionContext)
   const config = workflowNode.config
@@ -382,6 +433,11 @@ function NodeActionToolbar({
   const downloadURL = mediaOutputURL(output)
   const outputText = typeof textOutput?.value === 'string' ? textOutput.value : ''
   const isAI = type.startsWith('ai.')
+  const ratioOptions = [
+    ...new Set(
+      [...imageAspectRatios, aspectRatioValue].filter((ratio): ratio is string => Boolean(ratio)),
+    ),
+  ]
 
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation()
   const update = (patch: Record<string, unknown>) =>
@@ -391,167 +447,194 @@ function NodeActionToolbar({
   }
 
   return (
-    <div
-      className={`nodrag nowheel absolute left-0 top-full z-40 mt-3 flex max-w-[calc(100vw-2rem)] items-center gap-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-white/95 p-1.5 shadow-[0_10px_28px_rgba(24,24,27,.16)] transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
-      onPointerDown={stop}
-      onClick={stop}
-      role="toolbar"
-      aria-label={`${workflowNode.name} actions`}
+    <NodeToolbar
+      nodeId={workflowNode.id}
+      isVisible={selected}
+      position={Position.Bottom}
+      align="center"
+      offset={10}
+      className="nodrag nowheel !z-50"
     >
-      {isAI && (
-        <label
-          className="flex h-8 max-w-48 items-center border-r border-zinc-200 pr-1.5"
-          title="Choose the provider and model used by this node."
-        >
-          <span className="sr-only">Provider and model</span>
-          <select
-            aria-label="Provider and model"
-            value={selectedModelValue}
-            onChange={(event) => {
-              const [provider, ...modelParts] = event.target.value.split('::')
-              update({ provider, model: modelParts.join('::') })
-            }}
-            className="max-w-44 cursor-pointer truncate rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none"
-          >
-            {modelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {'aspectRatio' in config && (
-        <label className="flex h-8 items-center" title="Set the output aspect ratio.">
-          <span className="sr-only">Aspect ratio</span>
-          <select
-            aria-label="Aspect ratio"
-            value={String(config.aspectRatio || '1:1')}
-            onChange={(event) => update({ aspectRatio: event.target.value })}
-            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
-          >
-            {['9:16', '3:4', '1:1', '4:3', '16:9'].map((ratio) => (
-              <option key={ratio}>{ratio}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      {'quality' in config && (
-        <label className="flex h-8 items-center" title="Choose the generated image quality.">
-          <span className="sr-only">Quality</span>
-          <select
-            aria-label="Quality"
-            value={String(config.quality || 'standard')}
-            onChange={(event) => update({ quality: event.target.value })}
-            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
-          >
-            {['draft', 'standard', 'high'].map((quality) => (
-              <option key={quality}>{quality}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      {'duration' in config && (
-        <label
-          className="flex h-8 items-center"
-          title="Set the generated video duration in seconds."
-        >
-          <span className="sr-only">Duration</span>
-          <select
-            aria-label="Duration"
-            value={String(config.duration || 5)}
-            onChange={(event) => update({ duration: Number(event.target.value) })}
-            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
-          >
-            {[3, 4, 5, 6, 8, 10].map((duration) => (
-              <option key={duration} value={duration}>
-                {duration}s
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <button
-        type="button"
-        title={
-          isInputMedia
-            ? 'Run this media input and all connected downstream nodes.'
-            : 'Run this node with its connected dependencies.'
-        }
-        aria-label="Run node"
-        onClick={() => actions.runNode(workflowNode.id)}
-        className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-900 text-white hover:bg-violet-700"
+      <div
+        className="nodrag nowheel flex max-w-[calc(100vw-2rem)] items-center gap-1 overflow-x-auto rounded-lg border border-zinc-200 bg-white/95 p-1 shadow-[0_8px_20px_rgba(24,24,27,.14)]"
+        onPointerDown={stop}
+        onClick={stop}
+        role="toolbar"
+        aria-label={`${workflowNode.name} actions`}
       >
-        <Play size={14} fill="currentColor" />
-      </button>
-      {downloadURL && (
-        <a
-          href={mediaSource(
-            downloadURL,
-            (mediaNodeValue(config.selectedOutput) ?? output)?.assetId,
-          )}
-          download
-          target="_blank"
-          rel="noreferrer"
-          title="Download the currently displayed media output."
-          aria-label="Download media output"
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
-        >
-          <Download size={15} />
-        </a>
-      )}
-      {outputText && (
+        {isAI && (
+          <label
+            className="flex h-7 max-w-40 items-center border-r border-zinc-200 pr-1"
+            title="Choose the provider and model used by this node."
+          >
+            <span className="sr-only">Provider and model</span>
+            <select
+              aria-label="Provider and model"
+              value={selectedModelValue}
+              onChange={(event) => {
+                const [provider, ...modelParts] = event.target.value.split('::')
+                update({ provider, model: modelParts.join('::') })
+              }}
+              className="max-w-36 cursor-pointer truncate rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none"
+            >
+              {modelOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {'aspectRatio' in config && (
+          <label
+            className="flex h-7 items-center"
+            title="Choose the aspect ratio used for the next run. Changing it clears the current output."
+          >
+            <span className="sr-only">Aspect ratio</span>
+            <select
+              aria-label="Aspect ratio"
+              value={aspectRatioValue || String(config.aspectRatio || '1:1')}
+              onChange={(event) =>
+                update({
+                  aspectRatio: event.target.value,
+                  selectedOutput: null,
+                  outputRevision: nextOutputRevision(),
+                })
+              }
+              className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+            >
+              {ratioOptions.map((ratio) => (
+                <option key={ratio}>{ratio}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {'quality' in config && (
+          <label className="flex h-7 items-center" title="Choose the generated image quality.">
+            <span className="sr-only">Quality</span>
+            <select
+              aria-label="Quality"
+              value={String(config.quality || 'standard')}
+              onChange={(event) => update({ quality: event.target.value })}
+              className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+            >
+              {['draft', 'standard', 'high'].map((quality) => (
+                <option key={quality}>{quality}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {'duration' in config && (
+          <label
+            className="flex h-7 items-center"
+            title="Set the generated video duration in seconds."
+          >
+            <span className="sr-only">Duration</span>
+            <select
+              aria-label="Duration"
+              value={String(config.duration || 5)}
+              onChange={(event) => update({ duration: Number(event.target.value) })}
+              className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+            >
+              {[3, 4, 5, 6, 8, 10].map((duration) => (
+                <option key={duration} value={duration}>
+                  {duration}s
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           type="button"
-          title="Copy the latest text output."
-          aria-label="Copy text output"
-          onClick={copyOutput}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+          title={
+            isInputMedia
+              ? 'Run this media input and all connected downstream nodes.'
+              : 'Run this node with its connected dependencies.'
+          }
+          aria-label="Run node"
+          onClick={() => actions.runNode(workflowNode.id)}
+          className="grid size-7 shrink-0 place-items-center rounded-md bg-zinc-900 text-white hover:bg-violet-700"
         >
-          <Copy size={15} />
+          <Play size={13} fill="currentColor" />
         </button>
-      )}
-      {Boolean(config.selectedOutput) && (
+        {downloadURL && (
+          <a
+            href={mediaSource(
+              downloadURL,
+              (mediaNodeValue(config.selectedOutput) ?? output)?.assetId,
+            )}
+            download
+            target="_blank"
+            rel="noreferrer"
+            title="Download the currently displayed media output."
+            aria-label="Download media output"
+            className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-zinc-100"
+          >
+            <Download size={14} />
+          </a>
+        )}
+        {outputText && (
+          <button
+            type="button"
+            title="Copy the latest text output."
+            aria-label="Copy text output"
+            onClick={copyOutput}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-zinc-100"
+          >
+            <Copy size={14} />
+          </button>
+        )}
+        {Boolean(config.selectedOutput) && (
+          <button
+            type="button"
+            title="Clear this saved version so the next run generates a fresh result."
+            aria-label="Generate a fresh output on next run"
+            onClick={() => update({ selectedOutput: null })}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-violet-700 hover:bg-violet-50"
+          >
+            <RefreshCw size={14} />
+          </button>
+        )}
+        {isInputMedia && (
+          <button
+            type="button"
+            title="Open media settings to upload or replace the input."
+            aria-label="Open media settings"
+            onClick={() => actions.selectNode(workflowNode.id)}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-zinc-100"
+          >
+            <Settings2 size={14} />
+          </button>
+        )}
         <button
           type="button"
-          title="Clear this saved version so the next run generates a fresh result."
-          aria-label="Generate a fresh output on next run"
-          onClick={() => update({ selectedOutput: null })}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-violet-700 hover:bg-violet-50"
+          title="Duplicate this node."
+          aria-label="Duplicate node"
+          onClick={() => actions.duplicateNode(workflowNode.id)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-zinc-100"
         >
-          <RefreshCw size={15} />
+          <CopyPlus size={14} />
         </button>
-      )}
-      {isInputMedia && (
         <button
           type="button"
-          title="Open media settings to upload or replace the input."
-          aria-label="Open media settings"
+          title="Delete this node and its connections."
+          aria-label="Delete node"
+          onClick={() => actions.deleteNode(workflowNode.id)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-rose-50 hover:text-rose-700"
+        >
+          <Trash2 size={14} />
+        </button>
+        <button
+          type="button"
+          title="Open the Node Inspector."
+          aria-label="Open Node Inspector"
           onClick={() => actions.selectNode(workflowNode.id)}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-600 hover:bg-zinc-100"
         >
-          <Settings2 size={15} />
+          <MoreHorizontal size={15} />
         </button>
-      )}
-      <button
-        type="button"
-        title="Duplicate this node."
-        aria-label="Duplicate node"
-        onClick={() => actions.duplicateNode(workflowNode.id)}
-        className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
-      >
-        <CopyPlus size={15} />
-      </button>
-      <button
-        type="button"
-        title="Delete this node and its connections."
-        aria-label="Delete node"
-        onClick={() => actions.deleteNode(workflowNode.id)}
-        className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-rose-50 hover:text-rose-700"
-      >
-        <Trash2 size={15} />
-      </button>
-    </div>
+      </div>
+    </NodeToolbar>
   )
 }
 
@@ -638,8 +721,12 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const output =
     selectedOutput ??
     inputOutput ??
-    Object.values(record?.outputs ?? {}).find((value) => value.type === mediaType) ??
-    (record?.outputs ? Object.values(record.outputs)[0] : undefined)
+    (!data.outputStale
+      ? (Object.values(record?.outputs ?? {}).find((value) => value.type === mediaType) ??
+        (record?.outputs ? Object.values(record.outputs)[0] : undefined))
+      : undefined)
+  const toolbarRecord =
+    data.outputStale && !selectedOutput && record ? { ...record, outputs: undefined } : record
   const preview = output?.value
   const previewObject =
     preview && typeof preview === 'object' ? (preview as Record<string, unknown>) : null
@@ -689,13 +776,97 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
       ? imageRatioLabel(imageDimensions.width, imageDimensions.height)
       : ratio
   const mediaVersions = data.mediaVersions ?? []
+  const [previewOpen, setPreviewOpen] = useState(false)
+
+  useEffect(() => {
+    if (!previewOpen) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [previewOpen])
 
   if (mediaType) {
     return (
       <div
-        className={`group relative w-[320px] rounded-2xl transition ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.35)]' : ''} ${isRunning ? 'ring-4 ring-violet-100' : ''}`}
+        className={`group relative w-[320px] rounded-2xl transition ${selected ? 'drop-shadow-[0_0_6px_rgba(124,58,237,.28)]' : ''} ${isRunning ? 'ring-2 ring-violet-100' : ''}`}
       >
         <TypedHandles definition={definition} />
+        {mediaVersions.length ? (
+          <NodeToolbar
+            nodeId={data.workflowNode.id}
+            isVisible={selected}
+            position={Position.Top}
+            align="center"
+            offset={8}
+            className="nodrag nowheel !z-50"
+          >
+            <div className="nodrag nowheel flex h-14 max-w-[calc(100vw-2rem)] items-center justify-center gap-1.5 overflow-x-auto px-2">
+              {mediaVersions.map((version, index) => {
+                const versionURL = mediaSource(
+                  mediaOutputURL(version.output),
+                  version.output.assetId ?? version.output.metadata?.assetId,
+                  version.output.metadata?.filename ?? version.output.metadata?.fileName,
+                )
+                const currentAssetId = output?.assetId ?? output?.metadata?.assetId
+                const versionAssetId = version.output.assetId ?? version.output.metadata?.assetId
+                const active = Boolean(
+                  (currentAssetId && currentAssetId === versionAssetId) ||
+                  (mediaOutputURL(output) &&
+                    mediaOutputURL(output) === mediaOutputURL(version.output)) ||
+                  (mediaValue && versionURL === mediaValue),
+                )
+                return (
+                  <button
+                    key={`${version.executionId}-${index}`}
+                    type="button"
+                    title={`Saved ${version.output.type} · ${new Date(version.createdAt).toLocaleString()}`}
+                    aria-label={`Select saved media version ${index + 1}`}
+                    aria-pressed={active}
+                    onClick={() =>
+                      actions?.selectMediaVersion(data.workflowNode.id, version.output)
+                    }
+                    className={`relative shrink-0 overflow-hidden rounded-md border-2 bg-zinc-100 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${active ? 'z-10 h-11 w-8 -translate-y-1 border-violet-600 shadow-lg ring-2 ring-violet-200' : 'h-8 w-6 border-white opacity-80 shadow-sm hover:scale-110 hover:opacity-100 hover:border-violet-300'}`}
+                  >
+                    {version.output.type === 'image' && versionURL ? (
+                      <Image
+                        src={versionURL}
+                        alt=""
+                        fill
+                        sizes="32px"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    ) : versionURL ? (
+                      <video
+                        src={versionURL}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="size-full object-contain"
+                        onLoadedMetadata={(event) => {
+                          const video = event.currentTarget
+                          if (video.duration > 0)
+                            video.currentTime = Math.min(0.1, video.duration / 2)
+                        }}
+                      />
+                    ) : (
+                      <Video size={13} className="absolute inset-0 m-auto text-zinc-500" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </NodeToolbar>
+        ) : null}
         <div className="mb-2 flex items-center gap-2 px-1">
           <span className={`grid size-7 place-items-center rounded-lg ${tone.icon}`}>
             <Icon size={14} />
@@ -705,104 +876,76 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           </span>
           <NodeRunIndicator status={record?.status} />
         </div>
-        {mediaVersions.length ? (
+        <div className="relative">
           <div
-            className={`nodrag nowheel mb-2 flex max-w-full items-center gap-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-white/95 p-1.5 shadow-sm ${selected ? 'flex' : 'hidden group-hover:flex'}`}
+            className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-white shadow-[0_12px_30px_rgba(24,24,27,.1)] ${isRunning ? 'border-violet-400 ring-2 ring-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : 'border-zinc-200'}`}
+            style={{ aspectRatio: mediaRatio }}
           >
-            {mediaVersions.map((version, index) => {
-              const versionURL = mediaSource(
-                mediaOutputURL(version.output),
-                version.output.assetId ?? version.output.metadata?.assetId,
-                version.output.metadata?.filename ?? version.output.metadata?.fileName,
+            {mediaValue ? (
+              mediaType === 'video' ? (
+                <video src={mediaValue} controls className="size-full object-contain" />
+              ) : mediaAssetId ? (
+                <Image
+                  src={mediaValue}
+                  alt={data.workflowNode.name}
+                  fill
+                  sizes="320px"
+                  unoptimized
+                  className="object-contain object-center"
+                  onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
+                    const { naturalWidth, naturalHeight } = event.currentTarget
+                    if (naturalWidth > 0 && naturalHeight > 0) {
+                      setMeasuredImage({
+                        source: mediaValue,
+                        width: naturalWidth,
+                        height: naturalHeight,
+                      })
+                    }
+                  }}
+                />
+              ) : (
+                <Image
+                  src={mediaValue}
+                  alt={data.workflowNode.name}
+                  fill
+                  sizes="320px"
+                  unoptimized
+                  className="object-contain object-center"
+                  onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
+                    const { naturalWidth, naturalHeight } = event.currentTarget
+                    if (naturalWidth > 0 && naturalHeight > 0) {
+                      setMeasuredImage({
+                        source: mediaValue,
+                        width: naturalWidth,
+                        height: naturalHeight,
+                      })
+                    }
+                  }}
+                />
               )
-              const active = Boolean(
-                (selectedOutput?.assetId && selectedOutput.assetId === version.output.assetId) ||
-                (mediaOutputURL(selectedOutput ?? inputOutput) &&
-                  mediaOutputURL(selectedOutput ?? inputOutput) === mediaOutputURL(version.output)),
-              )
-              return (
-                <button
-                  key={`${version.executionId}-${index}`}
-                  type="button"
-                  title={`Show saved ${version.output.type} from ${new Date(version.createdAt).toLocaleString()}. Save the workflow to keep this version selected for future runs.`}
-                  aria-label={`Show saved media version ${index + 1}`}
-                  aria-pressed={active}
-                  onClick={() => actions?.selectMediaVersion(data.workflowNode.id, version.output)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-lg border p-1 text-[10px] font-medium ${active ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 bg-white text-zinc-600 hover:border-violet-300'}`}
-                >
-                  <span className="relative grid size-8 place-items-center overflow-hidden rounded-md bg-zinc-100">
-                    {version.output.type === 'image' && versionURL ? (
-                      <Image
-                        src={versionURL}
-                        alt=""
-                        fill
-                        sizes="32px"
-                        unoptimized
-                        className="object-cover"
-                      />
-                    ) : (
-                      <Video size={14} className="text-zinc-500" />
-                    )}
-                  </span>
-                  <span>v{mediaVersions.length - index}</span>
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-        <div
-          className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${isRunning ? 'border-violet-400' : selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
-          style={{ aspectRatio: mediaRatio }}
-        >
-          {mediaValue ? (
-            mediaType === 'video' ? (
-              <video src={mediaValue} controls className="size-full object-contain" />
-            ) : mediaAssetId ? (
-              <Image
-                src={mediaValue}
-                alt={data.workflowNode.name}
-                fill
-                sizes="320px"
-                unoptimized
-                className="object-contain"
-                onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
-                  const { naturalWidth, naturalHeight } = event.currentTarget
-                  if (naturalWidth > 0 && naturalHeight > 0) {
-                    setMeasuredImage({
-                      source: mediaValue,
-                      width: naturalWidth,
-                      height: naturalHeight,
-                    })
-                  }
-                }}
-              />
+            ) : record?.error ? (
+              <div className="p-5 text-center text-xs text-rose-600">{record.error}</div>
+            ) : mediaType === 'video' ? (
+              <Video size={38} className="text-zinc-300" />
             ) : (
-              <Image
-                src={mediaValue}
-                alt={data.workflowNode.name}
-                fill
-                sizes="320px"
-                unoptimized
-                className="object-contain"
-                onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
-                  const { naturalWidth, naturalHeight } = event.currentTarget
-                  if (naturalWidth > 0 && naturalHeight > 0) {
-                    setMeasuredImage({
-                      source: mediaValue,
-                      width: naturalWidth,
-                      height: naturalHeight,
-                    })
-                  }
+              <ImageIcon size={38} className="text-zinc-300" />
+            )}
+            {mediaValue ? (
+              <button
+                type="button"
+                aria-label="Enlarge media preview"
+                title="Enlarge preview"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setPreviewOpen(true)
                 }}
-              />
-            )
-          ) : record?.error ? (
-            <div className="p-5 text-center text-xs text-rose-600">{record.error}</div>
-          ) : mediaType === 'video' ? (
-            <Video size={38} className="text-zinc-300" />
-          ) : (
-            <ImageIcon size={38} className="text-zinc-300" />
-          )}
+                className="nodrag absolute right-3 top-3 z-10 grid size-8 place-items-center rounded-lg border border-zinc-200/80 bg-white/90 text-zinc-800 shadow-sm transition hover:scale-105 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                <Maximize2 size={16} />
+              </button>
+            ) : null}
+          </div>
         </div>
         {record?.error && mediaValue ? (
           <p className="mt-1.5 px-1 text-[10px] text-rose-600" title={record.error}>
@@ -819,7 +962,63 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span>{mediaRatioLabel}</span>
         </div>
         <NodeExecutionActivity logs={data.executionLogs} />
-        <NodeActionToolbar workflowNode={data.workflowNode} record={record} selected={selected} />
+        <NodeActionToolbar
+          workflowNode={data.workflowNode}
+          record={toolbarRecord}
+          selected={selected}
+          aspectRatioValue={mediaType === 'image' ? mediaRatioLabel : undefined}
+        />
+        {previewOpen && mediaValue && typeof document !== 'undefined'
+          ? createPortal(
+              <div
+                className="nodrag nopan fixed inset-0 z-[10000] grid place-items-center bg-black/80 p-4 backdrop-blur-sm"
+                role="presentation"
+                onPointerDown={(event) => {
+                  event.stopPropagation()
+                  if (event.target === event.currentTarget) setPreviewOpen(false)
+                }}
+              >
+                <section
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={`${mediaType === 'video' ? 'Video' : 'Image'} preview`}
+                  className="relative grid h-full max-h-[92vh] w-full max-w-6xl place-items-center"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    aria-label="Close preview"
+                    title="Close preview"
+                    onClick={() => setPreviewOpen(false)}
+                    className="absolute right-0 top-0 z-10 grid size-10 place-items-center rounded-full bg-white/95 text-zinc-900 shadow-lg transition hover:bg-white"
+                  >
+                    <X size={20} />
+                  </button>
+                  {mediaType === 'video' ? (
+                    <video
+                      src={mediaValue}
+                      controls
+                      autoPlay={false}
+                      playsInline
+                      className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
+                    />
+                  ) : (
+                    <div className="relative h-full w-full">
+                      <Image
+                        src={mediaValue}
+                        alt={data.workflowNode.name}
+                        fill
+                        sizes="100vw"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    </div>
+                  )}
+                </section>
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
     )
   }
@@ -843,7 +1042,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <NodeRunIndicator status={record?.status} />
         </div>
         <div
-          className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+          className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-2 ring-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : tone.border}`}
         >
           <div className="p-3.5 pb-2.5">
             <div className="mb-2 flex items-center justify-between">
@@ -889,7 +1088,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
 
   return (
     <div
-      className={`group relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+      className={`group relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-2 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : tone.border}`}
     >
       <TypedHandles definition={definition} />
       <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
@@ -976,6 +1175,7 @@ function toFlowNodes(
       record: records.find((record) => record.nodeId === node.id),
       executionLogs: logs.filter((log) => log.nodeId === node.id),
       mediaVersions: mediaOutputVersions(executions, node.id),
+      outputStale: isMediaOutputStale(node, executions),
     },
   }))
 }
@@ -1117,7 +1317,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [paletteSearch, setPaletteSearch] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [runStartedAt, setRunStartedAt] = useState<string | null>(null)
@@ -1237,6 +1437,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               ...node,
               data: {
                 ...node.data,
+                outputStale: isMediaOutputStale(node.data.workflowNode, refreshedExecutions),
                 ...(record
                   ? {
                       record: {
@@ -1735,18 +1936,24 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     setDirty(true)
   }
 
-  const updateConfigMany = (patch: Record<string, unknown>) => {
-    if (!selectedNode) return
-    updateSelected({ config: { ...selectedNode.data.workflowNode.config, ...patch } })
-  }
-
-  const updateConfig = (key: string, value: unknown) => {
-    updateConfigMany({ [key]: value })
-  }
-
   const updateNodeConfig = (nodeId: string, patch: Record<string, unknown>) => {
     const target = nodes.find((node) => node.id === nodeId)
     if (!target) return
+    const ratioChanged =
+      Object.hasOwn(patch, 'aspectRatio') &&
+      String(patch.aspectRatio) !== String(target.data.workflowNode.config.aspectRatio)
+    const configPatch = ratioChanged
+      ? {
+          ...patch,
+          selectedOutput: null,
+          outputRevision:
+            typeof patch.outputRevision === 'string' ? patch.outputRevision : nextOutputRevision(),
+        }
+      : patch
+    const workflowNode = {
+      ...target.data.workflowNode,
+      config: { ...target.data.workflowNode.config, ...configPatch },
+    }
     captureHistory()
     setNodes((current) =>
       current.map((node) =>
@@ -1755,16 +1962,23 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               ...node,
               data: {
                 ...node.data,
-                workflowNode: {
-                  ...node.data.workflowNode,
-                  config: { ...node.data.workflowNode.config, ...patch },
-                },
+                workflowNode,
+                outputStale: isMediaOutputStale(workflowNode, executions),
               },
             }
           : node,
       ),
     )
     setDirty(true)
+  }
+
+  const updateConfigMany = (patch: Record<string, unknown>) => {
+    if (!selectedNode) return
+    updateNodeConfig(selectedNode.id, patch)
+  }
+
+  const updateConfig = (key: string, value: unknown) => {
+    updateConfigMany({ [key]: value })
   }
 
   const selectMediaVersion = (nodeId: string, output: import('@znith/contracts').NodeValue) => {
@@ -2314,7 +2528,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                   onNodeDragStart={captureHistory}
                   onNodeClick={(_, node) => {
                     setSelectedId(node.id)
-                    setInspectorOpen(true)
                   }}
                   onPaneClick={() => setSelectedId(null)}
                   onPaneContextMenu={(event) => {
@@ -2893,7 +3106,7 @@ function MediaConfiguration({
   const modality =
     type === 'ai.analyze-image' ? 'vision' : type.includes('video') ? 'video' : 'image'
   const providers = providersFor(modality)
-  const ratios = ['9:16', '3:4', '1:1', '4:3', '16:9']
+  const ratios = imageAspectRatios
   return (
     <div className="space-y-4">
       {isInput && (
@@ -2970,15 +3183,17 @@ function MediaConfiguration({
           </label>
         </>
       )}
-      {'aspectRatio' in config && config.provider !== 'chatgpt2api' && (
+      {'aspectRatio' in config && (
         <div>
           <span className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            Aspect ratio
+            Output aspect ratio
           </span>
           <div className="flex flex-wrap gap-1.5">
             {ratios.map((ratio) => (
               <button
                 key={ratio}
+                type="button"
+                aria-pressed={config.aspectRatio === ratio}
                 onClick={() => onChange('aspectRatio', ratio)}
                 className={`rounded-full border px-2.5 py-1.5 text-[10px] font-medium ${config.aspectRatio === ratio ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-500'}`}
               >
@@ -2987,11 +3202,6 @@ function MediaConfiguration({
             ))}
           </div>
         </div>
-      )}
-      {'aspectRatio' in config && config.provider === 'chatgpt2api' && (
-        <p className="text-[10px] leading-relaxed text-zinc-400">
-          ChatGPT2API currently chooses image dimensions automatically.
-        </p>
       )}
       {'model' in config && (
         <label className="block">

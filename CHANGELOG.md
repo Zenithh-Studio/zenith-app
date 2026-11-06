@@ -6,6 +6,7 @@ Project releases and notable changes are recorded in this file. Release Please u
 
 ### Added
 
+- ChatGPT2API now pulls its English-language image from the separate GHCR repository, keeping its source outside Zenith.
 - Muse2API can generate videos through a server-configured asynchronous gateway.
 - Docker Compose now builds and runs Muse2API with a persistent browser-account store and a private shared API key.
 - The workflow node library now shows the 10 nodes used by the current studio workflows, while saved workflows retain access to legacy node definitions.

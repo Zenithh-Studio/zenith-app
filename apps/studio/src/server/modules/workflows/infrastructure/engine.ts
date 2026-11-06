@@ -113,6 +113,19 @@ type ImageAPIResponse = {
   error?: { message?: string }
 }
 
+function chatGPT2APIImageSize(aspectRatio: unknown) {
+  const sizeByRatio: Record<string, string> = {
+    '9:16': '864x1536',
+    '2:3': '1024x1536',
+    '3:4': '768x1024',
+    '1:1': '1024x1024',
+    '4:3': '1024x768',
+    '3:2': '1536x1024',
+    '16:9': '1536x864',
+  }
+  return sizeByRatio[text(aspectRatio || '1:1')] ?? '1024x1024'
+}
+
 function imageResultURL(image?: ImageAPIItem) {
   if (image?.url) return image.url
   if (image?.b64_json) return `data:image/png;base64,${image.b64_json}`
@@ -122,6 +135,7 @@ function imageResultURL(image?: ImageAPIItem) {
 async function requestChatGPT2APIImage(input: {
   model: string
   prompt: string
+  size: string
   references?: NodeValue[]
 }) {
   const apiKey = requireSecret('APP_CHATGPT2API_API_KEY')
@@ -133,6 +147,7 @@ async function requestChatGPT2APIImage(input: {
     form.set('model', input.model)
     form.set('prompt', input.prompt)
     form.set('n', '1')
+    form.set('size', input.size)
     form.set('response_format', 'b64_json')
     for (const [index, reference] of references.entries()) {
       const source = await fetch(absoluteMediaURL(reference.value))
@@ -158,6 +173,7 @@ async function requestChatGPT2APIImage(input: {
         model: input.model,
         prompt: input.prompt,
         n: 1,
+        size: input.size,
         response_format: 'b64_json',
       }),
     })
@@ -841,6 +857,7 @@ async function executeNode(
         const generated = await requestChatGPT2APIImage({
           model: text(node.config.model || 'gpt-image-2'),
           prompt,
+          size: chatGPT2APIImageSize(node.config.aspectRatio),
           references: inputs.image,
         })
         return {
@@ -936,6 +953,7 @@ async function executeNode(
         const generated = await requestChatGPT2APIImage({
           model: text(node.config.model || 'gpt-image-2'),
           prompt: text(inputs.prompt?.[0]?.value || node.config.prompt),
+          size: chatGPT2APIImageSize(node.config.aspectRatio),
           references: inputs.image,
         })
         return {
