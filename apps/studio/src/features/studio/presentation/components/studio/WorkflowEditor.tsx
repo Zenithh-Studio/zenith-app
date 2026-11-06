@@ -26,6 +26,7 @@ import {
 } from '@xyflow/react'
 import {
   ArrowLeft,
+  AudioLines,
   Braces,
   Check,
   ChevronDown,
@@ -61,6 +62,7 @@ import {
   Settings2,
   Upload,
   Video,
+  VolumeX,
   X,
   Zap,
 } from 'lucide-react'
@@ -77,7 +79,17 @@ import {
   useState,
   type SyntheticEvent,
 } from 'react'
-import { paletteNodeRegistry, providersFor, registryByType } from '@znith/contracts'
+import {
+  defaultModelDuration,
+  displayModelName,
+  modelDurationOptions,
+  modelSupportsAudioToggle,
+  modelResolutionOptions,
+  modelSupportsResolution,
+  paletteNodeRegistry,
+  providersFor,
+  registryByType,
+} from '@znith/contracts'
 import type {
   ExecutionDocument,
   ExecutionLog,
@@ -371,6 +383,142 @@ function isMediaOutputStale(node: WorkflowNode, executions: ExecutionDocument[])
   return previousRatio !== currentRatio
 }
 
+type ModelOption = {
+  value: string
+  providerId: string
+  providerName: string
+  model: string
+  modelName: string
+}
+
+function ModelSelector({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: ModelOption[]
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [position, setPosition] = useState({ top: 0, left: 12, width: 380 })
+  const trigger = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  const selected = options.find((option) => option.value === value)
+  const filtered = options.filter((option) =>
+    `${option.providerName} ${option.modelName} ${option.model}`
+      .toLowerCase()
+      .includes(search.trim().toLowerCase()),
+  )
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node
+      if (!menu.current?.contains(target) && !trigger.current?.contains(target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  const showMenu = () => {
+    const bounds = trigger.current?.getBoundingClientRect()
+    if (!bounds) return
+    const width = Math.min(440, window.innerWidth - 24)
+    const left = Math.max(12, Math.min(bounds.left, window.innerWidth - width - 12))
+    const top = Math.max(12, Math.min(bounds.bottom + 6, window.innerHeight - 400))
+    setPosition({ top, left, width })
+    setSearch('')
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        aria-label="Choose model"
+        aria-expanded={open}
+        onClick={showMenu}
+        className="flex h-8 max-w-48 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
+        title={selected ? `${selected.providerName} · ${selected.modelName}` : 'Choose model'}
+      >
+        <span className="truncate">{selected?.modelName || 'Select model'}</span>
+        <ChevronDown size={13} className="shrink-0 text-zinc-500" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menu}
+            role="dialog"
+            aria-label="Select a model"
+            className="fixed z-[120] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_12px_35px_rgba(24,24,27,.2)]"
+            style={{ top: position.top, left: position.left, width: position.width }}
+          >
+            <label className="relative block p-2">
+              <Search
+                size={15}
+                className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-400"
+              />
+              <input
+                autoFocus
+                aria-label="Search all models"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search all models…"
+                className="h-10 w-full rounded-lg bg-zinc-100 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-violet-200"
+              />
+            </label>
+            <div className="max-h-80 overflow-y-auto px-2 pb-2">
+              {filtered.map((option) => {
+                const active = option.value === value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      onChange(option.value)
+                      setOpen(false)
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition ${active ? 'bg-violet-50' : 'hover:bg-zinc-100'}`}
+                  >
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-800">
+                      {option.providerName === 'Google Gemini'
+                        ? 'G'
+                        : option.providerName.slice(0, 1)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-zinc-900">
+                        {option.modelName}
+                      </span>
+                      <span className="block truncate text-xs text-zinc-500">
+                        {option.providerName}
+                      </span>
+                    </span>
+                    {active && <Check size={15} className="shrink-0 text-violet-700" />}
+                  </button>
+                )
+              })}
+              {!filtered.length && (
+                <p className="px-3 py-8 text-center text-sm text-zinc-500">No matching models</p>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  )
+}
+
 function NodeActionToolbar({
   workflowNode,
   record,
@@ -403,14 +551,23 @@ function NodeActionToolbar({
   const providerModels = providersFor(modality).flatMap((provider) =>
     (provider.models[modality] ?? []).map((providerModel) => ({
       value: `${provider.id}::${providerModel}`,
-      label: `${provider.name} · ${providerModel}`,
+      providerId: provider.id,
+      providerName: provider.name,
+      model: providerModel,
+      modelName: displayModelName(providerModel),
     })),
   )
   const selectedModelValue = `${providerId}::${model}`
   const modelOptions = providerModels.some((option) => option.value === selectedModelValue)
     ? providerModels
     : [
-        { value: selectedModelValue, label: `${providerId} · ${model || 'Default model'}` },
+        {
+          value: selectedModelValue,
+          providerId,
+          providerName: providerId,
+          model: model || 'Default model',
+          modelName: model || 'Default model',
+        },
         ...providerModels,
       ]
   const selectedOutput = mediaNodeValue(config.selectedOutput)
@@ -433,6 +590,12 @@ function NodeActionToolbar({
   const downloadURL = mediaOutputURL(output)
   const outputText = typeof textOutput?.value === 'string' ? textOutput.value : ''
   const isAI = type.startsWith('ai.')
+  const isVideoGenerator = type === 'ai.generate-video' || type === 'ai.image-to-video'
+  const resolutionOptions = modelResolutionOptions(providerId, model)
+  const supportsResolution = modelSupportsResolution(providerId, model)
+  const supportsAudioToggle = modelSupportsAudioToggle(providerId, model)
+  const durationOptions = modelDurationOptions(providerId, model)
+  const canRunNode = isAI
   const ratioOptions = [
     ...new Set(
       [...imageAspectRatios, aspectRatioValue].filter((ratio): ratio is string => Boolean(ratio)),
@@ -468,21 +631,32 @@ function NodeActionToolbar({
             title="Choose the provider and model used by this node."
           >
             <span className="sr-only">Provider and model</span>
-            <select
-              aria-label="Provider and model"
+            <ModelSelector
               value={selectedModelValue}
-              onChange={(event) => {
-                const [provider, ...modelParts] = event.target.value.split('::')
-                update({ provider, model: modelParts.join('::') })
+              options={modelOptions}
+              onChange={(value) => {
+                const [provider, ...modelParts] = value.split('::')
+                const nextModel = modelParts.join('::')
+                const nextDurationOptions = modelDurationOptions(provider, nextModel)
+                const nextResolutionOptions = modelResolutionOptions(provider, nextModel)
+                update({
+                  provider,
+                  model: nextModel,
+                  ...(isVideoGenerator
+                    ? {
+                        duration: nextDurationOptions.includes(Number(config.duration))
+                          ? Number(config.duration)
+                          : defaultModelDuration(provider, nextModel),
+                        resolution: nextResolutionOptions.includes(String(config.resolution))
+                          ? config.resolution
+                          : (nextResolutionOptions[0] ?? '720p'),
+                        selectedOutput: null,
+                        outputRevision: nextOutputRevision(),
+                      }
+                    : {}),
+                })
               }}
-              className="max-w-36 cursor-pointer truncate rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none"
-            >
-              {modelOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         )}
         {'aspectRatio' in config && (
@@ -532,11 +706,15 @@ function NodeActionToolbar({
             <span className="sr-only">Duration</span>
             <select
               aria-label="Duration"
-              value={String(config.duration || 5)}
+              value={String(
+                durationOptions.includes(Number(config.duration))
+                  ? Number(config.duration)
+                  : (durationOptions[0] ?? 5),
+              )}
               onChange={(event) => update({ duration: Number(event.target.value) })}
               className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
             >
-              {[3, 4, 5, 6, 8, 10].map((duration) => (
+              {durationOptions.map((duration) => (
                 <option key={duration} value={duration}>
                   {duration}s
                 </option>
@@ -544,19 +722,74 @@ function NodeActionToolbar({
             </select>
           </label>
         )}
-        <button
-          type="button"
-          title={
-            isInputMedia
-              ? 'Run this media input and all connected downstream nodes.'
-              : 'Run this node with its connected dependencies.'
-          }
-          aria-label="Run node"
-          onClick={() => actions.runNode(workflowNode.id)}
-          className="grid size-7 shrink-0 place-items-center rounded-md bg-zinc-900 text-white hover:bg-violet-700"
-        >
-          <Play size={13} fill="currentColor" />
-        </button>
+        {isVideoGenerator && (
+          <label
+            className="flex h-7 items-center"
+            title={
+              supportsResolution
+                ? 'Choose the generated video resolution.'
+                : 'Resolution is not configurable for this model.'
+            }
+          >
+            <span className="sr-only">Video resolution</span>
+            <select
+              aria-label="Video resolution"
+              value={String(config.resolution || '720p')}
+              disabled={!supportsResolution}
+              onChange={(event) =>
+                update({
+                  resolution: event.target.value,
+                  selectedOutput: null,
+                  outputRevision: nextOutputRevision(),
+                })
+              }
+              className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-400"
+            >
+              {['480p', '720p', '1080p'].map((resolution) => (
+                <option
+                  key={resolution}
+                  value={resolution}
+                  disabled={!resolutionOptions.includes(resolution)}
+                >
+                  {resolution}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {isVideoGenerator && supportsAudioToggle && (
+          <button
+            type="button"
+            aria-label="Generate audio"
+            aria-pressed={config.generateAudio !== false}
+            title={
+              config.generateAudio === false
+                ? 'Audio generation is off.'
+                : 'Audio generation is on.'
+            }
+            onClick={() =>
+              update({
+                generateAudio: config.generateAudio === false,
+                selectedOutput: null,
+                outputRevision: nextOutputRevision(),
+              })
+            }
+            className={`grid size-7 shrink-0 place-items-center rounded-md ${config.generateAudio === false ? 'text-zinc-400 hover:bg-zinc-100' : 'bg-violet-50 text-violet-700 hover:bg-violet-100'}`}
+          >
+            {config.generateAudio === false ? <VolumeX size={14} /> : <AudioLines size={14} />}
+          </button>
+        )}
+        {canRunNode && (
+          <button
+            type="button"
+            title="Run this node with its connected dependencies."
+            aria-label="Run node"
+            onClick={() => actions.runNode(workflowNode.id)}
+            className="grid size-7 shrink-0 place-items-center rounded-md bg-zinc-900 text-white hover:bg-violet-700"
+          >
+            <Play size={13} fill="currentColor" />
+          </button>
+        )}
         {downloadURL && (
           <a
             href={mediaSource(
@@ -867,11 +1100,11 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
             </div>
           </NodeToolbar>
         ) : null}
-        <div className="mb-2 flex items-center gap-2 px-1">
-          <span className={`grid size-7 place-items-center rounded-lg ${tone.icon}`}>
-            <Icon size={14} />
+        <div className="mb-2 flex items-center gap-1.5 px-1">
+          <span className={`grid size-6 place-items-center rounded-md ${tone.icon}`}>
+            <Icon size={12} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-900">
             {data.workflowNode.name}
           </span>
           <NodeRunIndicator status={record?.status} />
@@ -1032,11 +1265,11 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         className={`group relative w-[352px] ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.2)]' : ''}`}
       >
         <TypedHandles definition={definition} />
-        <div className="mb-2 flex items-center gap-2 px-1">
-          <span className={`grid size-7 place-items-center rounded-lg ${tone.icon}`}>
-            <Icon size={14} />
+        <div className="mb-2 flex items-center gap-1.5 px-1">
+          <span className={`grid size-6 place-items-center rounded-md ${tone.icon}`}>
+            <Icon size={12} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-zinc-900">
             {data.workflowNode.name}
           </span>
           <NodeRunIndicator status={record?.status} />
@@ -1091,12 +1324,12 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
       className={`group relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-2 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : tone.border}`}
     >
       <TypedHandles definition={definition} />
-      <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
-        <span className={`grid size-8 place-items-center rounded-xl ${tone.icon}`}>
-          <Icon size={15} />
+      <div className="flex items-center gap-2.5 border-b border-zinc-100 px-3 py-2.5">
+        <span className={`grid size-7 place-items-center rounded-lg ${tone.icon}`}>
+          <Icon size={13} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-zinc-900">
+          <div className="truncate text-xs font-semibold text-zinc-900">
             {data.workflowNode.name}
           </div>
           <div className="text-[10px] text-zinc-400">@{slug}</div>
@@ -1711,7 +1944,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       { id, type: 'studioNode', position: workflowNode.position, data: { workflowNode } },
     ])
     setSelectedId(id)
-    setInspectorOpen(true)
+    setInspectorOpen(false)
     setDirty(true)
     setNodePickerOpen(false)
     setContextMenu(null)
@@ -1801,7 +2034,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       captureHistory()
       setNodes((current) => [...current, ...uploadedNodes])
       setSelectedId(uploadedNodes.at(-1)?.id ?? null)
-      setInspectorOpen(true)
+      setInspectorOpen(false)
       setDirty(true)
       setNodePickerOpen(false)
       setContextMenu(null)
@@ -2038,7 +2271,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       },
     ])
     setSelectedId(workflowNode.id)
-    setInspectorOpen(true)
+    setInspectorOpen(false)
     setDirty(true)
   }
 
@@ -2236,7 +2469,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-[#f5f5f6] text-zinc-950">
-      <header className="z-20 flex h-16 shrink-0 items-center border-b border-zinc-200 bg-white px-3 sm:px-5">
+      <header className="z-20 flex h-14 shrink-0 items-center border-b border-zinc-200 bg-white px-3 sm:px-4">
         <input
           ref={mediaInput}
           type="file"
@@ -2255,7 +2488,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         <div className="flex min-w-0 flex-1 items-center gap-2 lg:border-l lg:border-zinc-200 lg:pl-5">
           <Link
             href="/"
-            className="grid size-9 shrink-0 place-items-center rounded-xl text-zinc-500 hover:bg-zinc-100"
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100"
           >
             <ArrowLeft size={17} />
           </Link>
@@ -2276,7 +2509,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => openNodePicker()}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-zinc-200 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+            className="inline-flex h-8 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
           >
             <Plus size={14} /> <span className="hidden sm:inline">Add node</span>
           </button>
@@ -2284,7 +2517,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <button
               onClick={undo}
               title="Undo (⌘Z)"
-              className="grid size-9 place-items-center text-zinc-500 hover:bg-zinc-50 disabled:opacity-30"
+              className="grid size-8 place-items-center text-zinc-500 hover:bg-zinc-50 disabled:opacity-30"
               disabled={!undoStack.length}
             >
               <Undo2 size={14} />
@@ -2292,7 +2525,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <button
               onClick={redo}
               title="Redo (⇧⌘Z)"
-              className="grid size-9 place-items-center border-l border-zinc-200 text-zinc-500 hover:bg-zinc-50 disabled:opacity-30"
+              className="grid size-8 place-items-center border-l border-zinc-200 text-zinc-500 hover:bg-zinc-50 disabled:opacity-30"
               disabled={!redoStack.length}
             >
               <Redo2 size={14} />
@@ -2300,14 +2533,14 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           </div>
           <button
             onClick={autoLayout}
-            className="hidden h-9 items-center gap-2 rounded-xl border border-zinc-200 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-50 sm:flex"
+            className="hidden h-8 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-50 sm:flex"
           >
             <LayoutGrid size={14} /> Auto layout
           </button>
           <button
             onClick={() => save()}
             disabled={saving || !dirty}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-zinc-200 px-3 text-xs font-medium text-zinc-700 disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-700 disabled:opacity-40"
           >
             <Save size={14} />{' '}
             <span className="hidden sm:inline">{saving ? 'Saving' : 'Save'}</span>
@@ -2340,7 +2573,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           <button
             onClick={() => run()}
             disabled={running || nodes.length === 0}
-            className="inline-flex h-9 items-center gap-2 rounded-xl bg-violet-600 px-4 text-xs font-semibold text-white shadow-sm shadow-violet-200 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-2 rounded-lg bg-violet-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-violet-200 disabled:opacity-50"
           >
             {running ? (
               <LoaderCircle size={14} className="animate-spin" />
@@ -3260,14 +3493,29 @@ function MediaConfiguration({
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Duration (seconds)
           </span>
-          <input
-            type="number"
-            min={1}
-            max={config.provider === 'muse2api' ? 60 : 30}
-            value={Number(config.duration || 5)}
+          <select
+            value={String(
+              modelDurationOptions(
+                String(config.provider || ''),
+                String(config.model || ''),
+              ).includes(Number(config.duration))
+                ? Number(config.duration)
+                : (modelDurationOptions(
+                    String(config.provider || ''),
+                    String(config.model || ''),
+                  )[0] ?? 5),
+            )}
             onChange={(event) => onChange('duration', Number(event.target.value))}
             className="h-10 w-full rounded-xl border border-zinc-200 px-3 text-xs outline-none"
-          />
+          >
+            {modelDurationOptions(String(config.provider || ''), String(config.model || '')).map(
+              (duration) => (
+                <option key={duration} value={duration}>
+                  {duration}s
+                </option>
+              ),
+            )}
+          </select>
         </label>
       )}
     </div>

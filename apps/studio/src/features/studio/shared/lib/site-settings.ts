@@ -1,5 +1,5 @@
 export const siteSettings = {
-  title: process.env.SITE_TITLE || 'Znith AI Visual Workflow Studio',
+  title: process.env.SITE_TITLE || 'Znith Studio',
   description:
     process.env.SITE_DESCRIPTION || 'Build, execute, and monitor typed AI production workflows.',
   language: process.env.SITE_LOCALE || 'en',

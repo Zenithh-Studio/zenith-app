@@ -5,10 +5,10 @@ export function Brand() {
   return (
     <Link
       href="/"
-      className="flex items-center gap-2.5 font-semibold tracking-[-0.02em] text-zinc-950"
+      className="flex items-center gap-2 font-semibold tracking-[-0.02em] text-zinc-950"
     >
-      <span className="grid size-8 place-items-center rounded-xl bg-violet-600 text-white shadow-sm shadow-violet-200">
-        <Command size={17} strokeWidth={2.4} />
+      <span className="grid size-7 place-items-center rounded-lg bg-violet-600 text-white shadow-sm shadow-violet-200">
+        <Command size={15} strokeWidth={2.4} />
       </span>
       <span>Znith Studio</span>
     </Link>
