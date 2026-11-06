@@ -126,6 +126,7 @@ function requireSecret(
   name:
     | 'APP_OPENAI_API_KEY'
     | 'APP_CHATGPT2API_API_KEY'
+    | 'APP_MUSE2API_API_KEY'
     | 'APP_ANTHROPIC_API_KEY'
     | 'APP_GEMINI_API_KEY'
     | 'REPLICATE_API_TOKEN',
@@ -232,6 +233,137 @@ async function requestChatGPT2APIImage(input: {
   const url = imageResultURL(image)
   if (!url) throw new Error('ChatGPT2API completed without image data or a media URL.')
   return { url, revisedPrompt: image?.revised_prompt }
+}
+
+function muse2APIEndpoint(path = '') {
+  const baseURL = process.env.APP_MUSE2API_BASE_URL
+  if (!baseURL) {
+    throw new Error(
+      'Muse2API is not configured. Set the APP_MUSE2API_BASE_URL server environment variable.',
+    )
+  }
+
+  let url: URL
+  try {
+    url = new URL(`${baseURL.replace(/\/+$/, '')}/`)
+  } catch {
+    throw new Error('APP_MUSE2API_BASE_URL must be a valid absolute URL ending in /v1.')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('APP_MUSE2API_BASE_URL must use HTTP or HTTPS.')
+  }
+  if (url.username || url.password) {
+    throw new Error('Do not put credentials in APP_MUSE2API_BASE_URL; use APP_MUSE2API_API_KEY.')
+  }
+  if (url.search || url.hash || !url.pathname.replace(/\/+$/, '').endsWith('/v1')) {
+    throw new Error('APP_MUSE2API_BASE_URL must point to the service /v1 API root.')
+  }
+  return new URL(path, url)
+}
+
+async function muse2APIReferenceImage(value: unknown) {
+  const response = await fetch(absoluteMediaURL(value), {
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!response.ok) throw new Error('Could not download the first-frame image for Muse2API.')
+
+  const mimeType = response.headers.get('content-type')?.split(';', 1)[0]?.trim() || 'image/png'
+  if (!mimeType.startsWith('image/')) {
+    throw new Error('Muse2API first-frame references must be image files.')
+  }
+  const maximumReferenceBytes = 10 * 1024 * 1024
+  const contentLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && contentLength > maximumReferenceBytes) {
+    throw new Error('Muse2API first-frame images must be 10 MB or smaller.')
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (!buffer.byteLength || buffer.byteLength > maximumReferenceBytes) {
+    throw new Error('Muse2API first-frame images must be between 1 byte and 10 MB.')
+  }
+  return `data:${mimeType};base64,${buffer.toString('base64')}`
+}
+
+type Muse2APITask = {
+  id?: string
+  status?: string
+  model?: string
+  result?: { url?: string }
+  error?: string | { message?: string }
+  detail?: string
+  message?: string
+}
+
+function muse2APIError(task: Muse2APITask, fallback: string) {
+  if (typeof task.error === 'string' && task.error) return task.error
+  if (task.error && typeof task.error === 'object' && task.error.message) return task.error.message
+  return task.detail || task.message || fallback
+}
+
+async function runMuse2APIVideo(input: {
+  model: string
+  prompt: string
+  aspectRatio: string
+  duration: number
+  referenceImage?: string
+  timeoutMs: number
+}) {
+  const apiKey = requireSecret('APP_MUSE2API_API_KEY')
+  const baseURL = muse2APIEndpoint()
+  const deadline = Date.now() + clampNumber(input.timeoutMs || 300_000, 1_000, 900_000)
+  const request = async (path: string, init: RequestInit) => {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) throw new Error('Muse2API video generation timed out.')
+    return fetch(muse2APIEndpoint(path).toString(), {
+      ...init,
+      signal: AbortSignal.timeout(Math.min(remainingMs, 30_000)),
+    })
+  }
+  const headers = { Authorization: `Bearer ${apiKey}` }
+  const createResponse = await request('videos', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: input.model || 'muse-video',
+      prompt: input.prompt,
+      size: input.aspectRatio,
+      duration: Math.floor(clampNumber(input.duration || 5, 1, 60)),
+      ...(input.referenceImage ? { image: input.referenceImage } : {}),
+    }),
+  })
+  const createTask = (await createResponse.json()) as Muse2APITask
+  if (!createResponse.ok) {
+    throw new Error(
+      muse2APIError(createTask, `Muse2API request failed (${createResponse.status}).`),
+    )
+  }
+  if (!createTask.id) throw new Error('Muse2API did not return a video task ID.')
+
+  let task = createTask
+  const terminalStatuses = new Set(['succeeded', 'failed', 'canceled', 'cancelled', 'interrupted'])
+  while (!terminalStatuses.has(task.status || '')) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) throw new Error('Muse2API video generation timed out.')
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1_500, remainingMs)))
+
+    const pollResponse = await request(`videos/${encodeURIComponent(createTask.id)}`, {
+      headers,
+    })
+    task = (await pollResponse.json()) as Muse2APITask
+    if (!pollResponse.ok) {
+      throw new Error(muse2APIError(task, `Muse2API task polling failed (${pollResponse.status}).`))
+    }
+  }
+
+  if (task.status !== 'succeeded') {
+    throw new Error(muse2APIError(task, `Muse2API video generation ${task.status}.`))
+  }
+  if (!task.result?.url) throw new Error('Muse2API completed without a video URL.')
+  return {
+    url: new URL(task.result.url, baseURL).toString(),
+    providerJobId: createTask.id,
+    model: task.model || input.model || 'muse-video',
+  }
 }
 
 async function runReplicate(model: string, input: Record<string, unknown>) {
@@ -943,6 +1075,36 @@ async function executeNode(
         const url = mediaURL(result.url || result.output || result.data)
         if (!url) throw new Error('Custom provider completed without a media URL.')
         return { video: { type: 'video', value: { url }, metadata: { provider } } }
+      }
+      if (provider === 'muse2api') {
+        if (inputs.image && inputs.image.length > 1) {
+          throw new Error('Muse2API accepts one first-frame image per video request.')
+        }
+        if (inputs.video?.length) {
+          throw new Error('Muse2API supports text-to-video and first-frame image-to-video only.')
+        }
+        const generated = await runMuse2APIVideo({
+          model: text(node.config.model || 'muse-video'),
+          prompt,
+          aspectRatio: text(node.config.aspectRatio || '16:9'),
+          duration: Number(node.config.duration) || 5,
+          referenceImage: inputs.image?.[0]
+            ? await muse2APIReferenceImage(inputs.image[0].value)
+            : undefined,
+          timeoutMs: Number(node.config.timeoutMs) || 300_000,
+        })
+        return {
+          video: {
+            type: 'video',
+            value: { url: generated.url },
+            metadata: {
+              provider,
+              model: generated.model,
+              providerJobId: generated.providerJobId,
+              referenceAssetId: inputs.image?.[0]?.assetId,
+            },
+          },
+        }
       }
       const generated = await runReplicate(text(node.config.model), {
         prompt,

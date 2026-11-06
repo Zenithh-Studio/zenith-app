@@ -1,10 +1,11 @@
 import { executeWorkflowRequestSchema } from '@znith/contracts'
 import { getWorkflowService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
+import { withContextApiLogging } from '@/lib/server-logger'
 
 type WorkflowExecutionRouteContext = { params: Promise<{ id: string }> }
 
-export async function POST(request: Request, context: WorkflowExecutionRouteContext) {
+async function executeWorkflow(request: Request, context: WorkflowExecutionRouteContext) {
   const { id } = await context.params
   let requestBody: unknown
   try {
@@ -23,7 +24,9 @@ export async function POST(request: Request, context: WorkflowExecutionRouteCont
     const execution = await workflowService.execute(id, parsedRequest.data)
     if (!execution) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json(execution, { status: execution.status === 'failed' ? 422 : 200 })
-  } catch {
-    return backendUnavailableResponse()
+  } catch (error) {
+    return backendUnavailableResponse(error, '/api/studio/workflows/[id]/execute')
   }
 }
+
+export const POST = withContextApiLogging('/api/studio/workflows/[id]/execute', executeWorkflow)

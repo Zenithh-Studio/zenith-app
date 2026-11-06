@@ -2124,10 +2124,22 @@ function MediaConfiguration({
           <input
             value={String(config.model || '')}
             onChange={(event) => onChange('model', event.target.value)}
-            placeholder={type.includes('video') ? 'Replicate model version ID' : 'Model ID'}
+            placeholder={
+              type.includes('video')
+                ? config.provider === 'muse2api'
+                  ? 'muse-video'
+                  : 'Replicate model version ID'
+                : 'Model ID'
+            }
             className="h-10 w-full rounded-xl border border-zinc-200 px-3 text-xs outline-none focus:border-violet-300"
           />
         </label>
+      )}
+      {config.provider === 'muse2api' && (
+        <p className="text-[10px] leading-relaxed text-zinc-400">
+          Muse2API uses a server-configured gateway. It supports text-to-video or one first-frame
+          image.
+        </p>
       )}
       {(config.provider === 'custom-http' || config.provider === 'comfyui') && (
         <label className="block">
@@ -2164,7 +2176,7 @@ function MediaConfiguration({
           <input
             type="number"
             min={1}
-            max={30}
+            max={config.provider === 'muse2api' ? 60 : 30}
             value={Number(config.duration || 5)}
             onChange={(event) => onChange('duration', Number(event.target.value))}
             className="h-10 w-full rounded-xl border border-zinc-200 px-3 text-xs outline-none"

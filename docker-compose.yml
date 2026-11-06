@@ -63,6 +63,8 @@ services:
       NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3001}
       APP_CHATGPT2API_BASE_URL: ${APP_CHATGPT2API_BASE_URL:-http://chatgpt2api/v1}
       APP_CHATGPT2API_API_KEY: ${CHATGPT2API_AUTH_KEY:-${APP_CHATGPT2API_API_KEY:?Set CHATGPT2API_AUTH_KEY in .env}}
+      APP_MUSE2API_BASE_URL: ${APP_MUSE2API_BASE_URL:-http://host.docker.internal:18610/v1}
+      APP_MUSE2API_API_KEY: ${APP_MUSE2API_API_KEY:-}
     ports:
       - '${APP_PORT:-3001}:3000'
     volumes:

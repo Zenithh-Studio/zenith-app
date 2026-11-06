@@ -6,6 +6,7 @@ Project releases and notable changes are recorded in this file. Release Please u
 
 ### Added
 
+- Muse2API can generate videos through a server-configured asynchronous gateway.
 - ChatGPT2API is the default image provider for new Generate Image nodes, with server-side endpoint and API key configuration.
 - Text and prompt input cards can be edited directly on the workflow canvas.
 

@@ -201,7 +201,7 @@ export const nodeRegistry: NodeDefinition[] = [
     version: 1,
     displayName: 'Generate Video',
     category: 'AI',
-    description: 'Generates video through a configured Replicate model version.',
+    description: 'Generates video through a configured video provider.',
     inputs: [
       input('prompt', 'Prompt', 'text', false, false),
       input('image', 'Reference images', 'image', true, false),
@@ -224,7 +224,7 @@ export const nodeRegistry: NodeDefinition[] = [
     version: 1,
     displayName: 'Image to Video',
     category: 'AI',
-    description: 'Animates an image through a configured Replicate model version.',
+    description: 'Animates an image through a configured video provider.',
     inputs: [input('image', 'Image', 'image'), input('prompt', 'Prompt', 'text', false, false)],
     outputs: [output('video', 'Video', 'video')],
     defaultConfig: {

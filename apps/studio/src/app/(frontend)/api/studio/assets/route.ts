@@ -1,18 +1,19 @@
 import { AssetValidationError } from '@/server/modules/assets'
 import { getAssetService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
+import { withApiLogging } from '@/lib/server-logger'
 
-export async function GET() {
+async function listAssets(_request: Request) {
   try {
     const assetService = await getAssetService()
     const assets = await assetService.listAssets()
     return Response.json({ docs: assets })
-  } catch {
-    return backendUnavailableResponse()
+  } catch (error) {
+    return backendUnavailableResponse(error, '/api/studio/assets')
   }
 }
 
-export async function POST(request: Request) {
+async function uploadAsset(request: Request) {
   let formData: FormData
   try {
     formData = await request.formData()
@@ -41,6 +42,9 @@ export async function POST(request: Request) {
     if (error instanceof AssetValidationError) {
       return Response.json({ error: error.message }, { status: error.statusCode })
     }
-    return backendUnavailableResponse()
+    return backendUnavailableResponse(error, '/api/studio/assets')
   }
 }
+
+export const GET = withApiLogging('/api/studio/assets', listAssets)
+export const POST = withApiLogging('/api/studio/assets', uploadAsset)
