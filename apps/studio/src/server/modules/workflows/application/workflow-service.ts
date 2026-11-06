@@ -18,6 +18,7 @@ import type {
 } from '@znith/contracts'
 import type { EngineResult, WorkflowRunOptions } from './workflow-service.types'
 import type { WorkflowMediaPersister } from './workflow-media-persister'
+import { WorkflowAssetReferenceCleaner } from './workflow-asset-reference-cleaner'
 import type {
   ExecutionCreateRecord,
   WorkflowCreateRecord,
@@ -100,6 +101,10 @@ export class WorkflowService {
     if (!(await this.repository.findWorkflowById(id))) return false
     await this.repository.deleteWorkflow(id)
     return true
+  }
+
+  async clearAssetReferences(assetIds: string[]) {
+    return new WorkflowAssetReferenceCleaner(this.repository).clearAssetReferences(assetIds)
   }
 
   async execute(id: string, input: ExecuteWorkflowRequest): Promise<WorkflowRunResponse | null> {

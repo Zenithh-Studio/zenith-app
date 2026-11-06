@@ -1,5 +1,9 @@
 import type { AssetDocument } from '@znith/contracts'
-import type { AssetRepository, CreateAssetRecord } from '../domain/asset-repository'
+import type {
+  AssetReferenceCleaner,
+  AssetRepository,
+  CreateAssetRecord,
+} from '../domain/asset-repository'
 
 const allowedMimePrefixes = ['image/', 'video/', 'audio/', 'application/pdf']
 const maximumUploadBytes = 50 * 1024 * 1024
@@ -15,7 +19,10 @@ export class AssetValidationError extends Error {
 }
 
 export class AssetService {
-  constructor(private readonly repository: AssetRepository) {}
+  constructor(
+    private readonly repository: AssetRepository,
+    private readonly referenceCleaner?: AssetReferenceCleaner,
+  ) {}
 
   listAssets() {
     return this.repository.listAssets()
@@ -37,5 +44,22 @@ export class AssetService {
       ...input,
       alt: alt.slice(0, 500),
     })
+  }
+
+  async deleteAssets(assetIds: string[]) {
+    if (
+      !Array.isArray(assetIds) ||
+      !assetIds.length ||
+      assetIds.length > 100 ||
+      assetIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 128)
+    ) {
+      throw new AssetValidationError('Select between 1 and 100 valid assets to delete.', 400)
+    }
+    const uniqueIds = [...new Set(assetIds)]
+    await this.referenceCleaner?.clearAssetReferences(uniqueIds)
+    await this.repository.deleteAssets(uniqueIds, {
+      assetReferencesCleared: Boolean(this.referenceCleaner),
+    })
+    return uniqueIds
   }
 }

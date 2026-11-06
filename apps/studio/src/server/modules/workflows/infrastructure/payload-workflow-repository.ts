@@ -13,7 +13,14 @@ interface PayloadQueryOptions {
   depth: 0
   limit?: number
   sort?: string
+  page?: number
   where?: Record<string, unknown>
+}
+
+interface PayloadQueryResult {
+  docs: unknown[]
+  hasNextPage?: boolean
+  nextPage?: number | null
 }
 
 interface PayloadMutationOptions {
@@ -34,7 +41,7 @@ interface PayloadWorkflowDatabaseApi {
 
 export interface PayloadLocalApi {
   db: PayloadWorkflowDatabaseApi
-  find(options: PayloadQueryOptions): Promise<{ docs: unknown[] }>
+  find(options: PayloadQueryOptions): Promise<PayloadQueryResult>
   findByID(options: {
     collection: 'workflows'
     id: string
@@ -76,6 +83,37 @@ export class PayloadWorkflowRepository implements WorkflowRepository {
         : {}),
     })
     return docs.map((document) => asDocument<WorkflowDocument>(document))
+  }
+
+  async listAllWorkflows() {
+    return this.findAll('workflows', '-updatedAt').then((docs) =>
+      docs.map((document) => asDocument<WorkflowDocument>(document)),
+    )
+  }
+
+  async listAllExecutions() {
+    return this.findAll('executions', '-startedAt').then((docs) =>
+      docs.map((document) => asDocument<ExecutionDocument>(document)),
+    )
+  }
+
+  private async findAll(collection: 'workflows' | 'executions', sort: string) {
+    const documents: unknown[] = []
+    let page = 1
+    while (true) {
+      const result = await this.payloadClient.find({
+        collection,
+        overrideAccess: false,
+        depth: 0,
+        limit: 100,
+        sort,
+        page,
+      })
+      documents.push(...result.docs)
+      if (!result.hasNextPage || !result.nextPage) break
+      page = result.nextPage
+    }
+    return documents
   }
 
   async findWorkflowById(id: string) {

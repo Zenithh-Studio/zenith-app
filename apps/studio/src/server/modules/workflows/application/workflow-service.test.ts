@@ -45,6 +45,10 @@ class MemoryWorkflowRepository implements WorkflowRepository {
     return [...this.workflows.values()]
   }
 
+  async listAllWorkflows() {
+    return [...this.workflows.values()]
+  }
+
   async findWorkflowById(id: string) {
     return this.workflows.get(id) ?? null
   }
@@ -75,6 +79,10 @@ class MemoryWorkflowRepository implements WorkflowRepository {
 
   async listExecutions(workflowId: string) {
     return [...this.executions.values()].filter((execution) => execution.workflow === workflowId)
+  }
+
+  async listAllExecutions() {
+    return [...this.executions.values()]
   }
 
   async createExecution(data: ExecutionCreateRecord) {
@@ -125,6 +133,104 @@ class MemoryWorkflowRepository implements WorkflowRepository {
 const successfulRun: WorkflowRunResult = { status: 'succeeded', records: [], logs: [] }
 
 describe('WorkflowService', () => {
+  it('resets media inputs and saved outputs across workflows and execution history', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'image-input',
+          type: 'input.image',
+          name: 'Image',
+          position: { x: 0, y: 0 },
+          config: {
+            assetId: 'asset-deleted',
+            url: '/api/media/file/deleted.png',
+            fileName: 'deleted.png',
+            mimeType: 'image/png',
+            imageWidth: 500,
+            imageHeight: 400,
+          },
+        },
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate',
+          position: { x: 300, y: 0 },
+          config: {
+            provider: 'openai',
+            model: 'gpt-image-1',
+            selectedOutput: {
+              type: 'image',
+              assetId: 'asset-deleted',
+              value: { assetId: 'asset-deleted', url: '/api/media/file/deleted.png' },
+            },
+          },
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(definition))
+    repository.executions.set('execution-1', {
+      id: 'execution-1',
+      workflow: 'workflow-string-id',
+      status: 'succeeded',
+      scope: 'workflow',
+      startedAt: '2026-11-06T00:00:00.000Z',
+      snapshot: definition,
+      nodeRecords: [
+        {
+          nodeId: 'image-input',
+          status: 'succeeded',
+          outputs: {
+            image: {
+              type: 'image',
+              assetId: 'asset-deleted',
+              value: { assetId: 'asset-deleted', url: '/api/media/file/deleted.png' },
+            },
+          },
+        },
+        {
+          nodeId: 'generate',
+          status: 'succeeded',
+          outputs: {
+            image: {
+              type: 'image',
+              assetId: 'asset-keep',
+              value: { assetId: 'asset-keep', url: '/api/media/file/keep.png' },
+            },
+          },
+        },
+      ],
+      logs: [],
+      createdAt: '2026-11-06T00:00:00.000Z',
+      updatedAt: '2026-11-06T00:00:00.000Z',
+    })
+    const service = new WorkflowService(
+      repository,
+      vi.fn(async () => successfulRun),
+    )
+
+    await service.clearAssetReferences(['asset-deleted'])
+
+    const savedWorkflow = repository.workflows.get('workflow-string-id')!
+    expect(savedWorkflow.definition.nodes[0].config).toMatchObject({
+      assetId: '',
+      url: '',
+      fileName: '',
+      mimeType: 'image/png',
+    })
+    expect(savedWorkflow.definition.nodes[0].config.imageWidth).toBeUndefined()
+    expect(savedWorkflow.definition.nodes[1].config.selectedOutput).toBeNull()
+    expect(savedWorkflow.definition.nodes[1].config.outputRevision).toBeTruthy()
+
+    const savedExecution = repository.executions.get('execution-1')!
+    expect(savedExecution.snapshot.nodes[0].config.assetId).toBe('')
+    expect(savedExecution.nodeRecords[0].outputs).toEqual({})
+    expect(savedExecution.nodeRecords[1].outputs?.image?.assetId).toBe('asset-keep')
+    expect(repository.workflowWrites).toHaveLength(1)
+    expect(repository.executionWrites).toHaveLength(1)
+  })
+
   it('creates a workflow from a template and applies allowed overrides', async () => {
     const repository = new MemoryWorkflowRepository()
     const service = new WorkflowService(

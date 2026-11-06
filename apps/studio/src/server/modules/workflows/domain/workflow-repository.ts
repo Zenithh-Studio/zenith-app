@@ -17,7 +17,7 @@ export type ExecutionCreateRecord = Pick<
 export type ExecutionUpdateRecord = Partial<
   Pick<
     ExecutionDocument,
-    'status' | 'completedAt' | 'durationMs' | 'nodeRecords' | 'logs' | 'error'
+    'status' | 'completedAt' | 'durationMs' | 'snapshot' | 'nodeRecords' | 'logs' | 'error'
   >
 >
 
@@ -25,11 +25,13 @@ export type WorkflowRunClaim = 'claimed' | 'reclaimed' | null
 
 export interface WorkflowRepository {
   listWorkflows(search?: string): Promise<WorkflowDocument[]>
+  listAllWorkflows(): Promise<WorkflowDocument[]>
   findWorkflowById(id: string): Promise<WorkflowDocument | null>
   createWorkflow(data: WorkflowCreateRecord): Promise<WorkflowDocument>
   updateWorkflow(id: string, data: WorkflowUpdateRecord): Promise<WorkflowDocument>
   deleteWorkflow(id: string): Promise<void>
   listExecutions(workflowId: string, limit: number): Promise<ExecutionDocument[]>
+  listAllExecutions(): Promise<ExecutionDocument[]>
   createExecution(data: ExecutionCreateRecord): Promise<ExecutionDocument>
   updateExecution(id: string, data: ExecutionUpdateRecord): Promise<ExecutionDocument>
   claimWorkflowRun(

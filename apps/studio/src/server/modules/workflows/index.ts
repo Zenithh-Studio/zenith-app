@@ -1,4 +1,5 @@
 export * from './application/workflow-service'
+export * from './application/workflow-asset-reference-cleaner'
 export * from './application/workflow-media-persister'
 export type {
   WorkflowOutputPersistenceResult,

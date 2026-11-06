@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AssetDocument } from '@znith/contracts'
 import type { AssetRepository, CreateAssetRecord } from '../domain/asset-repository'
 import { AssetService } from './asset-service'
 
 class MemoryAssetRepository implements AssetRepository {
   readonly createdAssets: CreateAssetRecord[] = []
+  readonly deletedAssetIds: string[] = []
 
   async listAssets() {
     return []
@@ -20,6 +21,10 @@ class MemoryAssetRepository implements AssetRepository {
       filesize: data.file.size,
       createdAt: '2026-11-05T00:00:00.000Z',
     }
+  }
+
+  async deleteAssets(assetIds: string[]) {
+    this.deletedAssetIds.push(...assetIds)
   }
 }
 
@@ -63,5 +68,39 @@ describe('AssetService', () => {
       service.uploadAsset({ alt: '', file: file({ size: 50 * 1024 * 1024 + 1 }) }),
     ).rejects.toMatchObject({ statusCode: 413 })
     expect(repository.createdAssets).toEqual([])
+  })
+
+  it('clears workflow references before deleting a single or multiple assets', async () => {
+    const repository = new MemoryAssetRepository()
+    const calls: string[] = []
+    const service = new AssetService(repository, {
+      async clearAssetReferences(assetIds) {
+        calls.push(`references:${assetIds.join(',')}`)
+      },
+    })
+
+    await expect(service.deleteAssets(['asset-1', 'asset-2', 'asset-1'])).resolves.toEqual([
+      'asset-1',
+      'asset-2',
+    ])
+
+    expect(calls).toEqual(['references:asset-1,asset-2'])
+    expect(repository.deletedAssetIds).toEqual(['asset-1', 'asset-2'])
+  })
+
+  it('rejects invalid bulk delete requests before changing workflows or media', async () => {
+    const repository = new MemoryAssetRepository()
+    const clearAssetReferences = async () => undefined
+    const cleaner = { clearAssetReferences: vi.fn(clearAssetReferences) }
+    const service = new AssetService(repository, cleaner)
+
+    await expect(service.deleteAssets([])).rejects.toMatchObject({ statusCode: 400 })
+    await expect(service.deleteAssets(['asset-1', ' '])).rejects.toMatchObject({ statusCode: 400 })
+    await expect(
+      service.deleteAssets(Array.from({ length: 101 }, (_, index) => `asset-${index}`)),
+    ).rejects.toMatchObject({ statusCode: 400 })
+
+    expect(cleaner.clearAssetReferences).not.toHaveBeenCalled()
+    expect(repository.deletedAssetIds).toEqual([])
   })
 })

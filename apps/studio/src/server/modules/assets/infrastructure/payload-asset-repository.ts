@@ -20,6 +20,12 @@ export interface PayloadMediaApi {
       size: number
     }
   }): Promise<unknown>
+  delete(options: {
+    collection: 'media'
+    id: string
+    overrideAccess: false
+    context?: Record<string, unknown>
+  }): Promise<unknown>
 }
 
 function asAssetDocument(value: unknown): AssetDocument {
@@ -56,5 +62,16 @@ export class PayloadAssetRepository implements AssetRepository {
       },
     })
     return asAssetDocument(media)
+  }
+
+  async deleteAssets(assetIds: string[], options?: { assetReferencesCleared?: boolean }) {
+    for (const id of assetIds) {
+      await this.payloadClient.delete({
+        collection: 'media',
+        id,
+        overrideAccess: false,
+        ...(options?.assetReferencesCleared ? { context: { assetReferencesCleared: true } } : {}),
+      })
+    }
   }
 }

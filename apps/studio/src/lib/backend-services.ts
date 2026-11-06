@@ -1,6 +1,7 @@
 import {
   AssetService,
   PayloadAssetRepository,
+  createPayloadAssetReferenceCleaner,
   PayloadWorkflowRepository,
   WorkflowMediaPersister,
   WorkflowService,
@@ -26,5 +27,6 @@ export async function getWorkflowService() {
 export async function getAssetService() {
   const payloadClient = await getPayloadClient()
   const repository = new PayloadAssetRepository(payloadClient as unknown as PayloadMediaApi)
-  return new AssetService(repository)
+  const cleaner = createPayloadAssetReferenceCleaner(payloadClient as unknown as PayloadLocalApi)
+  return new AssetService(repository, cleaner)
 }

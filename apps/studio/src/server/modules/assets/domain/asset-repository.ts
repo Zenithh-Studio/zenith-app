@@ -15,4 +15,9 @@ export interface CreateAssetRecord {
 export interface AssetRepository {
   listAssets(): Promise<AssetDocument[]>
   createAsset(data: CreateAssetRecord): Promise<AssetDocument>
+  deleteAssets(assetIds: string[], options?: { assetReferencesCleared?: boolean }): Promise<void>
+}
+
+export interface AssetReferenceCleaner {
+  clearAssetReferences(assetIds: string[]): Promise<void>
 }
