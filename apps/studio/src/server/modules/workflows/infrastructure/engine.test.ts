@@ -174,6 +174,67 @@ describe('workflow engine', () => {
     expect(result.records.map((record) => record.nodeId)).toEqual(['input', 'template'])
   })
 
+  it('uses a saved media version as the node output and passes it downstream', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate image',
+          position: { x: 0, y: 0 },
+          config: {
+            provider: 'chatgpt2api',
+            selectedOutput: {
+              type: 'image',
+              value: {
+                url: '/api/media/file/selected-version.png',
+                fileName: 'selected-version.png',
+              },
+              assetId: 'selected-asset',
+            },
+          },
+        },
+        {
+          id: 'save',
+          type: 'output.save-image',
+          name: 'Save selected image',
+          position: { x: 300, y: 0 },
+          config: { fileName: 'selected.png' },
+        },
+      ],
+      edges: [
+        {
+          id: 'generate-save',
+          source: 'generate',
+          sourceHandle: 'image',
+          target: 'save',
+          targetHandle: 'image',
+        },
+      ],
+    }
+
+    const result = await runWorkflow(definition)
+
+    expect(result.status).toBe('succeeded')
+    expect(
+      result.records.find((record) => record.nodeId === 'generate')?.outputs?.image,
+    ).toMatchObject({
+      type: 'image',
+      value: { url: '/api/media/file/selected-version.png' },
+      assetId: 'selected-asset',
+    })
+    expect(
+      result.records.find((record) => record.nodeId === 'save')?.outputs?.image.value,
+    ).toMatchObject({
+      url: '/api/media/file/selected-version.png',
+      fileName: 'selected-version.png',
+    })
+    expect(result.logs.some((log) => log.message.includes('selected saved media output'))).toBe(
+      true,
+    )
+  })
+
   it('persists queued and running node records before execution finishes', async () => {
     const definition: WorkflowDefinition = {
       version: 1,

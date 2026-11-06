@@ -1093,6 +1093,17 @@ async function executeNode(
   }
 }
 
+function selectedMediaOutput(node: WorkflowNode): Record<string, NodeValue> | undefined {
+  const selected = node.config.selectedOutput
+  if (!selected || typeof selected !== 'object' || Array.isArray(selected)) return undefined
+  const value = selected as Partial<NodeValue>
+  if ((value.type !== 'image' && value.type !== 'video') || value.value === undefined)
+    return undefined
+  const port = registryByType.get(node.type)?.outputs.find((item) => item.dataType === value.type)
+  if (!port) return undefined
+  return { [port.id]: value as NodeValue }
+}
+
 export async function runWorkflow(
   definition: WorkflowDefinition,
   targetNodeId?: string,
@@ -1160,6 +1171,15 @@ export async function runWorkflow(
         nodeId: node.id,
         message: `${node.name} started`,
       })
+      const storedMediaOutput = selectedMediaOutput(node)
+      if (storedMediaOutput) {
+        await emitLog({
+          at: new Date().toISOString(),
+          level: 'info',
+          nodeId: node.id,
+          message: `${node.name} is using the selected saved media output.`,
+        })
+      }
       const retryCount = clampNumber(Number(node.config.retryCount) || 0, 0, 5)
       const timeoutMs = clampNumber(Number(node.config.timeoutMs) || 120_000, 100, 300_000)
       let result: Record<string, NodeValue> | undefined
@@ -1168,7 +1188,10 @@ export async function runWorkflow(
       for (let attempt = 0; attempt <= retryCount; attempt += 1) {
         try {
           result = await withTimeout(
-            executeNode(node, resolveInputs(node, definition.edges, outputs)),
+            Promise.resolve(
+              storedMediaOutput ??
+                executeNode(node, resolveInputs(node, definition.edges, outputs)),
+            ),
             timeoutMs,
           )
           successfulAttempt = attempt
