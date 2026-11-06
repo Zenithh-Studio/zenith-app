@@ -223,12 +223,52 @@ function imageRatioLabel(width: number, height: number) {
   return `${roundedWidth / divisor}:${roundedHeight / divisor}`
 }
 
+function NodeRunIndicator({ status }: { status?: NodeExecutionRecord['status'] }) {
+  if (status === 'running') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-700">
+        <LoaderCircle size={12} className="animate-spin" /> Running
+      </span>
+    )
+  }
+  if (status === 'queued') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-medium text-zinc-500">
+        <Clock3 size={11} /> Queued
+      </span>
+    )
+  }
+  if (status === 'succeeded') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700">
+        <Check size={12} /> Done
+      </span>
+    )
+  }
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700">
+        <CircleAlert size={12} /> Failed
+      </span>
+    )
+  }
+  if (status === 'skipped') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
+        <CircleAlert size={12} /> Skipped
+      </span>
+    )
+  }
+  return <GripVertical size={15} className="shrink-0 text-zinc-400" />
+}
+
 function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const textNodeEditor = useContext(TextNodeEditorContext)
   const definition = registryByType.get(data.workflowNode.type)
   const tone = categoryTone[definition?.category ?? 'Utility']
   const Icon = iconByType[data.workflowNode.type] ?? Zap
   const record = data.record
+  const isRunning = record?.status === 'running'
   const output = record?.outputs ? Object.values(record.outputs)[0] : undefined
   const preview = output?.value
   const previewObject =
@@ -285,7 +325,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   if (mediaType) {
     return (
       <div
-        className={`relative w-[320px] ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.35)]' : ''}`}
+        className={`relative w-[320px] rounded-2xl transition ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.35)]' : ''} ${isRunning ? 'ring-4 ring-violet-100' : ''}`}
       >
         <TypedHandles definition={definition} />
         <div className="mb-2 flex items-center gap-2 px-1">
@@ -295,18 +335,10 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
             {data.workflowNode.name}
           </span>
-          {record?.status === 'running' ? (
-            <LoaderCircle size={15} className="animate-spin text-violet-600" />
-          ) : record?.status === 'succeeded' ? (
-            <Check size={15} className="text-emerald-600" />
-          ) : record?.status === 'failed' ? (
-            <CircleAlert size={15} className="text-rose-600" />
-          ) : (
-            <GripVertical size={15} className="text-zinc-400" />
-          )}
+          <NodeRunIndicator status={record?.status} />
         </div>
         <div
-          className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
+          className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${isRunning ? 'border-violet-400' : selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
           style={{ aspectRatio: mediaRatio }}
         >
           {mediaValue ? (
@@ -393,18 +425,10 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">
             {data.workflowNode.name}
           </span>
-          {record?.status === 'running' ? (
-            <LoaderCircle size={15} className="animate-spin text-violet-600" />
-          ) : record?.status === 'succeeded' ? (
-            <Check size={15} className="text-emerald-600" />
-          ) : record?.status === 'failed' ? (
-            <CircleAlert size={15} className="text-rose-600" />
-          ) : (
-            <GripVertical size={15} className="text-zinc-300" />
-          )}
+          <NodeRunIndicator status={record?.status} />
         </div>
         <div
-          className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+          className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
         >
           <div className="p-3.5 pb-2.5">
             <div className="mb-2 flex items-center justify-between">
@@ -448,7 +472,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
 
   return (
     <div
-      className={`relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+      className={`relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
     >
       <TypedHandles definition={definition} />
       <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
@@ -461,15 +485,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           </div>
           <div className="text-[10px] text-zinc-400">@{slug}</div>
         </div>
-        {record?.status === 'running' ? (
-          <LoaderCircle size={15} className="animate-spin text-violet-600" />
-        ) : record?.status === 'succeeded' ? (
-          <Check size={15} className="text-emerald-600" />
-        ) : record?.status === 'failed' ? (
-          <CircleAlert size={15} className="text-rose-600" />
-        ) : (
-          <GripVertical size={15} className="text-zinc-300" />
-        )}
+        <NodeRunIndicator status={record?.status} />
       </div>
       <div className={`${mediaType ? 'min-h-[230px]' : 'min-h-[76px]'} p-3.5`}>
         {!definition?.available ? (
@@ -644,6 +660,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const [runStartedAt, setRunStartedAt] = useState<string | null>(null)
+  const [runScopeIds, setRunScopeIds] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
   const [runConfirmation, setRunConfirmation] = useState<{
@@ -656,6 +674,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const mediaInput = useRef<HTMLInputElement>(null)
   const uploadTarget = useRef<'new' | 'selected'>('new')
+  const runStartedAtRef = useRef<string | null>(null)
   const [undoStack, setUndoStack] = useState<WorkflowDefinition[]>([])
   const [redoStack, setRedoStack] = useState<WorkflowDefinition[]>([])
   const textEditHistoryCaptured = useRef(new Set<string>())
@@ -663,7 +682,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const { fitView, screenToFlowPosition } = useReactFlow()
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/studio/workflows/${workflowId}`)
+    const response = await fetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
     const responseBody = await response.json()
     if (!response.ok) return setError(responseBody.error || 'Could not load workflow.')
     setWorkflow(responseBody.workflow)
@@ -685,6 +704,69 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!running || !runStartedAt) return
+
+    let active = true
+    let requestInFlight = false
+    const refreshProgress = async () => {
+      if (requestInFlight) return
+      requestInFlight = true
+      try {
+        const response = await fetch(`/api/studio/workflows/${workflowId}`, {
+          cache: 'no-store',
+        })
+        if (!response.ok) return
+        const responseBody = await response.json()
+        if (
+          !active ||
+          runStartedAtRef.current !== runStartedAt ||
+          !Array.isArray(responseBody.executions)
+        ) {
+          return
+        }
+
+        const refreshedExecutions = responseBody.executions as ExecutionDocument[]
+        const currentExecution = refreshedExecutions.find(
+          (execution) => execution.startedAt >= runStartedAt,
+        )
+        if (!currentExecution) return
+
+        setExecutions(refreshedExecutions)
+        const recordsById = new Map(
+          currentExecution.nodeRecords.map((record) => [record.nodeId, record]),
+        )
+        setNodes((current) =>
+          current.map((node) => {
+            const record = recordsById.get(node.id)
+            if (!record) return node
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                record: {
+                  ...record,
+                  outputs: record.outputs ?? node.data.record?.outputs,
+                },
+              },
+            }
+          }),
+        )
+      } catch {
+        // A temporary progress refresh failure should not interrupt the running execution.
+      } finally {
+        requestInFlight = false
+      }
+    }
+
+    void refreshProgress()
+    const interval = window.setInterval(() => void refreshProgress(), 900)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [runStartedAt, running, setNodes, workflowId])
 
   const definitionFromState = useCallback(
     (): WorkflowDefinition => ({
@@ -761,6 +843,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     setRunning(true)
     setError('')
     const scopeNodeIds = runScopeNodeIds(definitionFromState(), targetNodeId)
+    setRunScopeIds([...scopeNodeIds])
+    const startedAt = new Date().toISOString()
+    runStartedAtRef.current = startedAt
+    setRunStartedAt(startedAt)
     setNodes((current) =>
       current.map((node) => ({
         ...node,
@@ -805,9 +891,11 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       if (!response.ok) setError(responseBody.error || 'Execution failed.')
       await load()
     } catch {
-      setError('Could not finish workflow execution. Refresh to see its saved outputs.')
+      setError('Could not confirm workflow execution. Checking saved outputs…')
       await load()
     } finally {
+      runStartedAtRef.current = null
+      setRunStartedAt(null)
       setRunning(false)
     }
   }
@@ -831,6 +919,17 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     ? registryByType.get(selectedNode.data.workflowNode.type)
     : undefined
   const latestExecution = executions[0]
+  const runScope = new Set(runScopeIds)
+  const runNodes = nodes.filter((node) => runScope.has(node.id))
+  const runningNodeNames = runNodes
+    .filter((node) => node.data.record?.status === 'running')
+    .map((node) => node.data.workflowNode.name)
+  const completedRunNodeCount = runNodes.filter((node) =>
+    ['succeeded', 'failed', 'skipped'].includes(node.data.record?.status ?? ''),
+  ).length
+  const runningNodeLabel = runningNodeNames.length
+    ? runningNodeNames.join(', ')
+    : 'Preparing workflow'
   const isTextInputNode = Boolean(
     selectedNode && ['input.text', 'input.prompt'].includes(selectedNode.data.workflowNode.type),
   )
@@ -1316,12 +1415,32 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <Save size={14} />{' '}
             <span className="hidden sm:inline">{saving ? 'Saving' : 'Save'}</span>
           </button>
+          {running ? (
+            <div
+              aria-live="polite"
+              aria-label={`Running: ${runningNodeLabel}`}
+              className="hidden max-w-[240px] items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-[10px] font-medium text-violet-800 md:flex"
+              role="status"
+              title={runningNodeLabel}
+            >
+              <LoaderCircle size={13} className="shrink-0 animate-spin" />
+              <span className="max-w-[150px] truncate">{runningNodeLabel}</span>
+              <span className="shrink-0 tabular-nums text-violet-600">
+                {completedRunNodeCount}/{runScopeIds.length}
+              </span>
+            </div>
+          ) : null}
           <button
             onClick={() => run()}
             disabled={running || nodes.length === 0}
             className="inline-flex h-9 items-center gap-2 rounded-xl bg-violet-600 px-4 text-xs font-semibold text-white shadow-sm shadow-violet-200 disabled:opacity-50"
           >
-            <Play size={14} fill="currentColor" /> {running ? 'Running' : 'Run all'}
+            {running ? (
+              <LoaderCircle size={14} className="animate-spin" />
+            ) : (
+              <Play size={14} fill="currentColor" />
+            )}{' '}
+            {running ? 'Running' : 'Run all'}
           </button>
         </div>
       </header>

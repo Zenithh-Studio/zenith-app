@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
   ExecutionDocument,
+  NodeExecutionRecord,
   WorkflowDefinition,
   WorkflowDocument,
   WorkflowRunResult,
@@ -12,7 +13,7 @@ import type {
   WorkflowRepository,
   WorkflowUpdateRecord,
 } from '../domain/workflow-repository'
-import { WorkflowService } from './workflow-service'
+import { WorkflowService, type WorkflowRunner } from './workflow-service'
 
 function createWorkflowDocument(
   definition: WorkflowDefinition = { version: 1, nodes: [], edges: [] },
@@ -173,6 +174,40 @@ describe('WorkflowService', () => {
       status: 'succeeded',
       lastExecutionAt: '2026-11-05T00:00:00.250Z',
     })
+  })
+
+  it('persists node progress records as nodes start and complete', async () => {
+    const startedRecord: NodeExecutionRecord = {
+      nodeId: 'prompt',
+      status: 'running',
+      startedAt: '2026-11-05T00:00:00.050Z',
+    }
+    const completedRecord: NodeExecutionRecord = {
+      nodeId: 'prompt',
+      status: 'succeeded',
+      startedAt: startedRecord.startedAt,
+      completedAt: '2026-11-05T00:00:00.100Z',
+      durationMs: 50,
+      outputs: { text: { type: 'text', value: 'Generated output' } },
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument())
+    const runWorkflow: WorkflowRunner = async (_definition, _targetNodeId, options) => {
+      await options?.onNodeRecord?.(startedRecord)
+      await options?.onNodeRecord?.(completedRecord)
+      return { status: 'succeeded', records: [completedRecord], logs: [] }
+    }
+    const service = new WorkflowService(repository, runWorkflow)
+
+    await service.execute('workflow-string-id', {})
+
+    expect(repository.executionWrites.map((write) => write.nodeRecords?.[0]?.status)).toEqual([
+      'running',
+      'succeeded',
+      'succeeded',
+    ])
+    expect(repository.executionWrites[1].nodeRecords?.[0].outputs?.text.value).toBe(
+      'Generated output',
+    )
   })
 
   it('does not run a missing workflow', async () => {
