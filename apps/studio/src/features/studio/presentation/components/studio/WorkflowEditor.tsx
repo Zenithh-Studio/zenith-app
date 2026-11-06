@@ -4,8 +4,11 @@ import {
   addEdge,
   Background,
   BackgroundVariant,
+  BaseEdge,
   Connection,
   Controls,
+  EdgeLabelRenderer,
+  EdgeProps,
   Edge,
   Handle,
   MiniMap,
@@ -14,6 +17,7 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
+  getBezierPath,
   reconnectEdge,
   useEdgesState,
   useNodesState,
@@ -28,6 +32,8 @@ import {
   Clock3,
   Code2,
   Copy,
+  CopyPlus,
+  Download,
   FileText,
   GripVertical,
   Image as ImageIcon,
@@ -85,8 +91,27 @@ type StudioNodeData = {
   workflowNode: WorkflowNode
   record?: NodeExecutionRecord
   executionLogs?: ExecutionLog[]
+  mediaVersions?: MediaOutputVersion[]
 }
 type StudioNode = Node<StudioNodeData, 'studioNode'>
+
+type MediaOutputVersion = {
+  executionId: string
+  createdAt: string
+  output: import('@znith/contracts').NodeValue
+}
+
+type NodeActionContextValue = {
+  runNode: (nodeId: string) => void
+  deleteNode: (nodeId: string) => void
+  duplicateNode: (nodeId: string) => void
+  selectNode: (nodeId: string) => void
+  updateNodeConfig: (nodeId: string, patch: Record<string, unknown>) => void
+  selectMediaVersion: (nodeId: string, output: import('@znith/contracts').NodeValue) => void
+}
+
+const NodeActionContext = createContext<NodeActionContextValue | null>(null)
+const EdgeDeleteContext = createContext<((edgeId: string) => void) | null>(null)
 
 type TextNodeEditorContextValue = {
   updateValue: (nodeId: string, value: string) => void
@@ -279,20 +304,345 @@ function NodeExecutionActivity({ logs }: { logs?: ExecutionLog[] }) {
   )
 }
 
+function mediaNodeValue(value: unknown, expectedType?: string) {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  if (candidate.type !== 'image' && candidate.type !== 'video') return undefined
+  if (expectedType && candidate.type !== expectedType) return undefined
+  return candidate as unknown as import('@znith/contracts').NodeValue
+}
+
+function mediaOutputURL(output?: import('@znith/contracts').NodeValue) {
+  const value = output?.value
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') {
+    const url = (value as Record<string, unknown>).url
+    return typeof url === 'string' ? url : ''
+  }
+  return ''
+}
+
+function NodeActionToolbar({
+  workflowNode,
+  record,
+  selected,
+}: {
+  workflowNode: WorkflowNode
+  record?: NodeExecutionRecord
+  selected: boolean
+}) {
+  const actions = useContext(NodeActionContext)
+  const config = workflowNode.config
+  const type = workflowNode.type
+  if (!actions) return null
+
+  const modality =
+    type === 'ai.generate-text'
+      ? 'text'
+      : type === 'ai.analyze-image'
+        ? 'vision'
+        : type.includes('video')
+          ? 'video'
+          : 'image'
+  const providerId = String(
+    config.provider ||
+      (modality === 'video' ? 'muse2api' : modality === 'image' ? 'chatgpt2api' : 'openai'),
+  )
+  const model = String(config.model || '')
+  const providerModels = providersFor(modality).flatMap((provider) =>
+    (provider.models[modality] ?? []).map((providerModel) => ({
+      value: `${provider.id}::${providerModel}`,
+      label: `${provider.name} · ${providerModel}`,
+    })),
+  )
+  const selectedModelValue = `${providerId}::${model}`
+  const modelOptions = providerModels.some((option) => option.value === selectedModelValue)
+    ? providerModels
+    : [
+        { value: selectedModelValue, label: `${providerId} · ${model || 'Default model'}` },
+        ...providerModels,
+      ]
+  const selectedOutput = mediaNodeValue(config.selectedOutput)
+  const isInputMedia = type === 'input.image' || type === 'input.video'
+  const inputOutput =
+    isInputMedia && config.url
+      ? ({
+          type: type === 'input.image' ? 'image' : 'video',
+          value: { url: config.url },
+          assetId: config.assetId,
+        } as import('@znith/contracts').NodeValue)
+      : undefined
+  const output =
+    selectedOutput ??
+    Object.values(record?.outputs ?? {})
+      .map((value) => mediaNodeValue(value))
+      .find(Boolean) ??
+    inputOutput
+  const textOutput = Object.values(record?.outputs ?? {}).find((value) => value.type === 'text')
+  const downloadURL = mediaOutputURL(output)
+  const outputText = typeof textOutput?.value === 'string' ? textOutput.value : ''
+  const isAI = type.startsWith('ai.')
+
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation()
+  const update = (patch: Record<string, unknown>) =>
+    actions.updateNodeConfig(workflowNode.id, patch)
+  const copyOutput = () => {
+    if (outputText) void navigator.clipboard?.writeText(outputText)
+  }
+
+  return (
+    <div
+      className={`nodrag nowheel absolute left-0 top-full z-40 mt-3 flex max-w-[calc(100vw-2rem)] items-center gap-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-white/95 p-1.5 shadow-[0_10px_28px_rgba(24,24,27,.16)] transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
+      onPointerDown={stop}
+      onClick={stop}
+      role="toolbar"
+      aria-label={`${workflowNode.name} actions`}
+    >
+      {isAI && (
+        <label
+          className="flex h-8 max-w-48 items-center border-r border-zinc-200 pr-1.5"
+          title="Choose the provider and model used by this node."
+        >
+          <span className="sr-only">Provider and model</span>
+          <select
+            aria-label="Provider and model"
+            value={selectedModelValue}
+            onChange={(event) => {
+              const [provider, ...modelParts] = event.target.value.split('::')
+              update({ provider, model: modelParts.join('::') })
+            }}
+            className="max-w-44 cursor-pointer truncate rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none"
+          >
+            {modelOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {'aspectRatio' in config && (
+        <label className="flex h-8 items-center" title="Set the output aspect ratio.">
+          <span className="sr-only">Aspect ratio</span>
+          <select
+            aria-label="Aspect ratio"
+            value={String(config.aspectRatio || '1:1')}
+            onChange={(event) => update({ aspectRatio: event.target.value })}
+            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+          >
+            {['9:16', '3:4', '1:1', '4:3', '16:9'].map((ratio) => (
+              <option key={ratio}>{ratio}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {'quality' in config && (
+        <label className="flex h-8 items-center" title="Choose the generated image quality.">
+          <span className="sr-only">Quality</span>
+          <select
+            aria-label="Quality"
+            value={String(config.quality || 'standard')}
+            onChange={(event) => update({ quality: event.target.value })}
+            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+          >
+            {['draft', 'standard', 'high'].map((quality) => (
+              <option key={quality}>{quality}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {'duration' in config && (
+        <label
+          className="flex h-8 items-center"
+          title="Set the generated video duration in seconds."
+        >
+          <span className="sr-only">Duration</span>
+          <select
+            aria-label="Duration"
+            value={String(config.duration || 5)}
+            onChange={(event) => update({ duration: Number(event.target.value) })}
+            className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-[11px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
+          >
+            {[3, 4, 5, 6, 8, 10].map((duration) => (
+              <option key={duration} value={duration}>
+                {duration}s
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <button
+        type="button"
+        title={
+          isInputMedia
+            ? 'Run this media input and all connected downstream nodes.'
+            : 'Run this node with its connected dependencies.'
+        }
+        aria-label="Run node"
+        onClick={() => actions.runNode(workflowNode.id)}
+        className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-900 text-white hover:bg-violet-700"
+      >
+        <Play size={14} fill="currentColor" />
+      </button>
+      {downloadURL && (
+        <a
+          href={mediaSource(
+            downloadURL,
+            (mediaNodeValue(config.selectedOutput) ?? output)?.assetId,
+          )}
+          download
+          target="_blank"
+          rel="noreferrer"
+          title="Download the currently displayed media output."
+          aria-label="Download media output"
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+        >
+          <Download size={15} />
+        </a>
+      )}
+      {outputText && (
+        <button
+          type="button"
+          title="Copy the latest text output."
+          aria-label="Copy text output"
+          onClick={copyOutput}
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+        >
+          <Copy size={15} />
+        </button>
+      )}
+      {Boolean(config.selectedOutput) && (
+        <button
+          type="button"
+          title="Clear this saved version so the next run generates a fresh result."
+          aria-label="Generate a fresh output on next run"
+          onClick={() => update({ selectedOutput: null })}
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-violet-700 hover:bg-violet-50"
+        >
+          <RefreshCw size={15} />
+        </button>
+      )}
+      {isInputMedia && (
+        <button
+          type="button"
+          title="Open media settings to upload or replace the input."
+          aria-label="Open media settings"
+          onClick={() => actions.selectNode(workflowNode.id)}
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+        >
+          <Settings2 size={15} />
+        </button>
+      )}
+      <button
+        type="button"
+        title="Duplicate this node."
+        aria-label="Duplicate node"
+        onClick={() => actions.duplicateNode(workflowNode.id)}
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100"
+      >
+        <CopyPlus size={15} />
+      </button>
+      <button
+        type="button"
+        title="Delete this node and its connections."
+        aria-label="Delete node"
+        onClick={() => actions.deleteNode(workflowNode.id)}
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-rose-50 hover:text-rose-700"
+      >
+        <Trash2 size={15} />
+      </button>
+    </div>
+  )
+}
+
+function ConnectionEdge(props: EdgeProps<Edge<{ targetPort?: string }>>) {
+  const [hovered, setHovered] = useState(false)
+  const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const deleteEdge = useContext(EdgeDeleteContext)
+  const [path, labelX, labelY] = getBezierPath(props)
+  const show = () => {
+    if (hideTimeout.current) clearTimeout(hideTimeout.current)
+    setHovered(true)
+  }
+  const hideSoon = () => {
+    hideTimeout.current = setTimeout(() => setHovered(false), 100)
+  }
+
+  return (
+    <>
+      <g onMouseEnter={show} onMouseLeave={hideSoon}>
+        <BaseEdge
+          id={props.id}
+          path={path}
+          markerEnd={props.markerEnd}
+          markerStart={props.markerStart}
+          style={props.style}
+          interactionWidth={24}
+        />
+      </g>
+      <EdgeLabelRenderer>
+        <div
+          className="nodrag nopan absolute z-50 transition-opacity"
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? 'all' : 'none',
+          }}
+          onMouseEnter={show}
+          onMouseLeave={hideSoon}
+        >
+          <button
+            type="button"
+            title="Remove this connection."
+            aria-label="Remove connection"
+            onClick={(event) => {
+              event.stopPropagation()
+              deleteEdge?.(props.id)
+            }}
+            className="grid size-7 place-items-center rounded-full border-2 border-white bg-sky-500 text-white shadow-md transition hover:scale-110 hover:bg-rose-600"
+          >
+            <X size={15} strokeWidth={2.5} />
+          </button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
 function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const textNodeEditor = useContext(TextNodeEditorContext)
+  const actions = useContext(NodeActionContext)
   const definition = registryByType.get(data.workflowNode.type)
   const tone = categoryTone[definition?.category ?? 'Utility']
   const Icon = iconByType[data.workflowNode.type] ?? Zap
   const record = data.record
   const isRunning = record?.status === 'running'
-  const output = record?.outputs ? Object.values(record.outputs)[0] : undefined
-  const preview = output?.value
-  const previewObject =
-    preview && typeof preview === 'object' ? (preview as Record<string, unknown>) : null
   const mediaType = definition?.outputs.find(
     (port) => port.dataType === 'image' || port.dataType === 'video',
   )?.dataType
+  const isInputMedia =
+    data.workflowNode.type === 'input.image' || data.workflowNode.type === 'input.video'
+  const selectedOutput = mediaNodeValue(data.workflowNode.config.selectedOutput, mediaType)
+  const inputOutput =
+    isInputMedia && data.workflowNode.config.url
+      ? ({
+          type: mediaType,
+          value: {
+            url: data.workflowNode.config.url,
+            fileName: data.workflowNode.config.fileName,
+            mimeType: data.workflowNode.config.mimeType,
+          },
+          assetId: data.workflowNode.config.assetId,
+        } as import('@znith/contracts').NodeValue)
+      : undefined
+  const output =
+    selectedOutput ??
+    inputOutput ??
+    Object.values(record?.outputs ?? {}).find((value) => value.type === mediaType) ??
+    (record?.outputs ? Object.values(record.outputs)[0] : undefined)
+  const preview = output?.value
+  const previewObject =
+    preview && typeof preview === 'object' ? (preview as Record<string, unknown>) : null
   const mediaAssetId =
     output?.assetId ??
     output?.metadata?.assetId ??
@@ -338,11 +688,12 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
     mediaType === 'image' && imageDimensions
       ? imageRatioLabel(imageDimensions.width, imageDimensions.height)
       : ratio
+  const mediaVersions = data.mediaVersions ?? []
 
   if (mediaType) {
     return (
       <div
-        className={`relative w-[320px] rounded-2xl transition ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.35)]' : ''} ${isRunning ? 'ring-4 ring-violet-100' : ''}`}
+        className={`group relative w-[320px] rounded-2xl transition ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.35)]' : ''} ${isRunning ? 'ring-4 ring-violet-100' : ''}`}
       >
         <TypedHandles definition={definition} />
         <div className="mb-2 flex items-center gap-2 px-1">
@@ -354,6 +705,51 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           </span>
           <NodeRunIndicator status={record?.status} />
         </div>
+        {mediaVersions.length ? (
+          <div
+            className={`nodrag nowheel mb-2 flex max-w-full items-center gap-1.5 overflow-x-auto rounded-xl border border-zinc-200 bg-white/95 p-1.5 shadow-sm ${selected ? 'flex' : 'hidden group-hover:flex'}`}
+          >
+            {mediaVersions.map((version, index) => {
+              const versionURL = mediaSource(
+                mediaOutputURL(version.output),
+                version.output.assetId ?? version.output.metadata?.assetId,
+                version.output.metadata?.filename ?? version.output.metadata?.fileName,
+              )
+              const active = Boolean(
+                (selectedOutput?.assetId && selectedOutput.assetId === version.output.assetId) ||
+                (mediaOutputURL(selectedOutput ?? inputOutput) &&
+                  mediaOutputURL(selectedOutput ?? inputOutput) === mediaOutputURL(version.output)),
+              )
+              return (
+                <button
+                  key={`${version.executionId}-${index}`}
+                  type="button"
+                  title={`Show saved ${version.output.type} from ${new Date(version.createdAt).toLocaleString()}. Save the workflow to keep this version selected for future runs.`}
+                  aria-label={`Show saved media version ${index + 1}`}
+                  aria-pressed={active}
+                  onClick={() => actions?.selectMediaVersion(data.workflowNode.id, version.output)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-lg border p-1 text-[10px] font-medium ${active ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 bg-white text-zinc-600 hover:border-violet-300'}`}
+                >
+                  <span className="relative grid size-8 place-items-center overflow-hidden rounded-md bg-zinc-100">
+                    {version.output.type === 'image' && versionURL ? (
+                      <Image
+                        src={versionURL}
+                        alt=""
+                        fill
+                        sizes="32px"
+                        unoptimized
+                        className="object-cover"
+                      />
+                    ) : (
+                      <Video size={14} className="text-zinc-500" />
+                    )}
+                  </span>
+                  <span>v{mediaVersions.length - index}</span>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
         <div
           className={`relative grid w-full place-items-center overflow-hidden rounded-2xl border bg-zinc-100 shadow-[0_12px_30px_rgba(24,24,27,.1)] ${isRunning ? 'border-violet-400' : selected ? 'border-violet-500 ring-4 ring-violet-100' : 'border-zinc-200'}`}
           style={{ aspectRatio: mediaRatio }}
@@ -423,6 +819,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span>{mediaRatioLabel}</span>
         </div>
         <NodeExecutionActivity logs={data.executionLogs} />
+        <NodeActionToolbar workflowNode={data.workflowNode} record={record} selected={selected} />
       </div>
     )
   }
@@ -433,7 +830,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
 
     return (
       <div
-        className={`relative w-[352px] ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.2)]' : ''}`}
+        className={`group relative w-[352px] ${selected ? 'drop-shadow-[0_0_10px_rgba(124,58,237,.2)]' : ''}`}
       >
         <TypedHandles definition={definition} />
         <div className="mb-2 flex items-center gap-2 px-1">
@@ -485,13 +882,14 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span>@{slug}</span>
         </div>
         <NodeExecutionActivity logs={data.executionLogs} />
+        <NodeActionToolbar workflowNode={data.workflowNode} record={record} selected={selected} />
       </div>
     )
   }
 
   return (
     <div
-      className={`relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
+      className={`group relative ${mediaType ? 'w-[320px]' : 'w-[272px]'} rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-4 ring-violet-100 shadow-violet-100' : selected ? 'border-violet-500 ring-4 ring-violet-100' : tone.border}`}
     >
       <TypedHandles definition={definition} />
       <div className="flex items-center gap-3 border-b border-zinc-100 px-3.5 py-3">
@@ -555,16 +953,19 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         </span>
         <span className="font-medium">{record?.status ?? 'idle'}</span>
       </div>
+      <NodeActionToolbar workflowNode={data.workflowNode} record={record} selected={selected} />
     </div>
   )
 }
 
 const nodeTypes = { studioNode: StudioNodeCard }
+const edgeTypes = { bezier: ConnectionEdge }
 
 function toFlowNodes(
   definition: WorkflowDefinition,
   records: NodeExecutionRecord[] = [],
   logs: ExecutionLog[] = [],
+  executions: ExecutionDocument[] = [],
 ): StudioNode[] {
   return definition.nodes.map((node) => ({
     id: node.id,
@@ -574,8 +975,35 @@ function toFlowNodes(
       workflowNode: node,
       record: records.find((record) => record.nodeId === node.id),
       executionLogs: logs.filter((log) => log.nodeId === node.id),
+      mediaVersions: mediaOutputVersions(executions, node.id),
     },
   }))
+}
+
+function mediaOutputVersions(
+  executions: ExecutionDocument[],
+  nodeId: string,
+): MediaOutputVersion[] {
+  const versions: MediaOutputVersion[] = []
+  const seen = new Set<string>()
+  for (const execution of executions) {
+    const record = execution.nodeRecords?.find(
+      (item) => item.nodeId === nodeId && item.status === 'succeeded',
+    )
+    if (!record?.outputs) continue
+    for (const output of Object.values(record.outputs)) {
+      if (output.type !== 'image' && output.type !== 'video') continue
+      const identity = output.assetId || mediaOutputURL(output) || `${execution.id}:${output.type}`
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      versions.push({
+        executionId: execution.id,
+        createdAt: record.completedAt || execution.completedAt || execution.startedAt,
+        output,
+      })
+    }
+  }
+  return versions
 }
 
 function mergeExecutionNodeRecords(executions: ExecutionDocument[]) {
@@ -733,6 +1161,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         responseBody.workflow.definition,
         mergeExecutionNodeRecords(refreshedExecutions),
         latestExecution?.logs,
+        refreshedExecutions,
       ),
     )
     if (activeExecution) {
@@ -1315,6 +1744,97 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     updateConfigMany({ [key]: value })
   }
 
+  const updateNodeConfig = (nodeId: string, patch: Record<string, unknown>) => {
+    const target = nodes.find((node) => node.id === nodeId)
+    if (!target) return
+    captureHistory()
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                workflowNode: {
+                  ...node.data.workflowNode,
+                  config: { ...node.data.workflowNode.config, ...patch },
+                },
+              },
+            }
+          : node,
+      ),
+    )
+    setDirty(true)
+  }
+
+  const selectMediaVersion = (nodeId: string, output: import('@znith/contracts').NodeValue) => {
+    const node = nodes.find((item) => item.id === nodeId)
+    if (!node) return
+    if (
+      node.data.workflowNode.type === 'input.image' ||
+      node.data.workflowNode.type === 'input.video'
+    ) {
+      const value =
+        output.value && typeof output.value === 'object'
+          ? (output.value as Record<string, unknown>)
+          : {}
+      updateNodeConfig(nodeId, {
+        url: mediaOutputURL(output),
+        assetId: output.assetId || output.metadata?.assetId || '',
+        fileName: value.fileName || output.metadata?.filename || output.metadata?.fileName || '',
+        mimeType:
+          value.mimeType ||
+          output.metadata?.mimeType ||
+          (output.type === 'image' ? 'image/png' : 'video/mp4'),
+        selectedOutput: null,
+      })
+      return
+    }
+    updateNodeConfig(nodeId, { selectedOutput: cloneValue(output) })
+  }
+
+  const deleteNodeById = (nodeId: string) => {
+    if (!nodes.some((node) => node.id === nodeId)) return
+    captureHistory()
+    setNodes((current) => current.filter((node) => node.id !== nodeId))
+    setEdges((current) =>
+      current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+    )
+    setSelectedId((current) => (current === nodeId ? null : current))
+    setDirty(true)
+  }
+
+  const duplicateNodeById = (nodeId: string) => {
+    const source = nodes.find((node) => node.id === nodeId)
+    if (!source) return
+    captureHistory()
+    const workflowNode = {
+      ...cloneValue(source.data.workflowNode),
+      id: `${source.data.workflowNode.type.replaceAll('.', '-')}-${crypto.randomUUID().slice(0, 8)}`,
+      name: `${source.data.workflowNode.name} copy`,
+      position: { x: source.position.x + 36, y: source.position.y + 36 },
+    }
+    setNodes((current) => [
+      ...current,
+      {
+        id: workflowNode.id,
+        type: 'studioNode',
+        position: workflowNode.position,
+        data: { workflowNode },
+      },
+    ])
+    setSelectedId(workflowNode.id)
+    setInspectorOpen(true)
+    setDirty(true)
+  }
+
+  const deleteEdgeById = (edgeId: string) => {
+    if (!edges.some((edge) => edge.id === edgeId)) return
+    captureHistory()
+    setEdges((current) => current.filter((edge) => edge.id !== edgeId))
+    setDirty(true)
+  }
+
   const updateTextNodeValue = useCallback(
     (nodeId: string, value: string) => {
       if (!textEditHistoryCaptured.current.has(nodeId)) {
@@ -1754,73 +2274,99 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         )}
 
         <section className="relative min-w-0 flex-1">
-          <TextNodeEditorContext.Provider value={textNodeEditor}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              onNodesChange={(changes) => {
-                onNodesChange(changes)
-                if (
-                  changes.some((change) => change.type === 'position' && change.dragging === false)
-                )
-                  setDirty(true)
-              }}
-              onEdgesChange={(changes) => {
-                onEdgesChange(changes)
-                setDirty(true)
-              }}
-              onConnect={connect}
-              onReconnect={reconnect}
-              onNodeDragStart={captureHistory}
-              onNodeClick={(_, node) => {
-                setSelectedId(node.id)
+          <NodeActionContext.Provider
+            value={{
+              runNode: (nodeId) => {
+                void run(nodeId)
+              },
+              deleteNode: deleteNodeById,
+              duplicateNode: duplicateNodeById,
+              selectNode: (nodeId) => {
+                setSelectedId(nodeId)
                 setInspectorOpen(true)
-              }}
-              onPaneClick={() => setSelectedId(null)}
-              onPaneContextMenu={(event) => {
-                event.preventDefault()
-                setContextMenu({ x: event.clientX, y: event.clientY })
-                setPickerPosition(screenToFlowPosition({ x: event.clientX, y: event.clientY }))
-              }}
-              onNodesDelete={(deleted) => {
-                const ids = new Set(deleted.map((node) => node.id))
-                setEdges((current) =>
-                  current.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
-                )
-                setDirty(true)
-              }}
-              onEdgesDelete={() => {
-                captureHistory()
-                setDirty(true)
-              }}
-              fitView
-              minZoom={0.2}
-              maxZoom={1.8}
-              defaultEdgeOptions={{
-                type: 'bezier',
-                style: { stroke: '#8b5cf6', strokeWidth: 2 },
-              }}
-              connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
-              deleteKeyCode={['Backspace', 'Delete']}
-              multiSelectionKeyCode={['Meta', 'Control']}
-              selectionOnDrag
-            >
-              <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#d4d4d8" />
-              <Controls
-                position="bottom-left"
-                className="!m-4 !overflow-hidden !rounded-xl !border-zinc-200 !shadow-lg"
-              />
-              <MiniMap
-                position="bottom-right"
-                className="!m-4 !rounded-xl !border !border-zinc-200 !bg-white !shadow-lg"
-                nodeColor="#8b5cf6"
-                maskColor="rgba(244,244,245,.72)"
-                pannable
-                zoomable
-              />
-            </ReactFlow>
-          </TextNodeEditorContext.Provider>
+              },
+              updateNodeConfig,
+              selectMediaVersion,
+            }}
+          >
+            <EdgeDeleteContext.Provider value={deleteEdgeById}>
+              <TextNodeEditorContext.Provider value={textNodeEditor}>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onNodesChange={(changes) => {
+                    onNodesChange(changes)
+                    if (
+                      changes.some(
+                        (change) => change.type === 'position' && change.dragging === false,
+                      )
+                    )
+                      setDirty(true)
+                  }}
+                  onEdgesChange={(changes) => {
+                    onEdgesChange(changes)
+                    setDirty(true)
+                  }}
+                  onConnect={connect}
+                  onReconnect={reconnect}
+                  onNodeDragStart={captureHistory}
+                  onNodeClick={(_, node) => {
+                    setSelectedId(node.id)
+                    setInspectorOpen(true)
+                  }}
+                  onPaneClick={() => setSelectedId(null)}
+                  onPaneContextMenu={(event) => {
+                    event.preventDefault()
+                    setContextMenu({ x: event.clientX, y: event.clientY })
+                    setPickerPosition(screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+                  }}
+                  onNodesDelete={(deleted) => {
+                    const ids = new Set(deleted.map((node) => node.id))
+                    setEdges((current) =>
+                      current.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
+                    )
+                    setDirty(true)
+                  }}
+                  onEdgesDelete={() => {
+                    captureHistory()
+                    setDirty(true)
+                  }}
+                  fitView
+                  minZoom={0.2}
+                  maxZoom={1.8}
+                  defaultEdgeOptions={{
+                    type: 'bezier',
+                    style: { stroke: '#8b5cf6', strokeWidth: 2 },
+                  }}
+                  connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
+                  deleteKeyCode={['Backspace', 'Delete']}
+                  multiSelectionKeyCode={['Meta', 'Control']}
+                  selectionOnDrag
+                >
+                  <Background
+                    variant={BackgroundVariant.Dots}
+                    gap={20}
+                    size={1.2}
+                    color="#d4d4d8"
+                  />
+                  <Controls
+                    position="bottom-left"
+                    className="!m-4 !overflow-hidden !rounded-xl !border-zinc-200 !shadow-lg"
+                  />
+                  <MiniMap
+                    position="bottom-right"
+                    className="!m-4 !rounded-xl !border !border-zinc-200 !bg-white !shadow-lg"
+                    nodeColor="#8b5cf6"
+                    maskColor="rgba(244,244,245,.72)"
+                    pannable
+                    zoomable
+                  />
+                </ReactFlow>
+              </TextNodeEditorContext.Provider>
+            </EdgeDeleteContext.Provider>
+          </NodeActionContext.Provider>
           <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-[10px] font-medium text-zinc-500 shadow-sm backdrop-blur">
             {nodes.length} nodes · {edges.length} connections
           </div>
