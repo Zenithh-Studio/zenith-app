@@ -7,6 +7,7 @@ Project releases and notable changes are recorded in this file. Release Please u
 ### Added
 
 - Muse2API can generate videos through a server-configured asynchronous gateway.
+- Docker Compose now builds and runs Muse2API with a persistent browser-account store and a private shared API key.
 - The workflow node library now shows the 10 nodes used by the current studio workflows, while saved workflows retain access to legacy node definitions.
 - New video generation nodes and the video starter template use Muse2API by default.
 - ChatGPT2API is the default image provider for new Generate Image nodes, with server-side endpoint and API key configuration.
