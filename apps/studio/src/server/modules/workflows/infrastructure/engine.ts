@@ -502,6 +502,9 @@ async function generateText(node: WorkflowNode, prompt: string) {
   }
   if (provider === 'gemini') {
     const key = requireSecret('APP_GEMINI_API_KEY')
+    const generationConfig = ['gemini-3.8-flash', 'gemini-4-argon'].includes(model)
+      ? undefined
+      : { temperature: Number(node.config.temperature ?? 0.7) }
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${key}`,
       {
@@ -510,7 +513,7 @@ async function generateText(node: WorkflowNode, prompt: string) {
         body: JSON.stringify({
           systemInstruction: system ? { parts: [{ text: system }] } : undefined,
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: Number(node.config.temperature ?? 0.7) },
+          generationConfig,
         }),
       },
     )

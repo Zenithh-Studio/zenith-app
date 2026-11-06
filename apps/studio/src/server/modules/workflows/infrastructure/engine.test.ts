@@ -659,6 +659,62 @@ describe('workflow engine', () => {
     expect(result.error).toContain(secret)
   })
 
+  it('uses Gemini 3.8 Flash without unsupported sampling settings', async () => {
+    vi.stubEnv('APP_GEMINI_API_KEY', 'gemini-test-key')
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ candidates: [{ content: { parts: [{ text: 'A concise answer.' }] } }] }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'prompt',
+          type: 'input.prompt',
+          name: 'Prompt',
+          position: { x: 0, y: 0 },
+          config: { value: 'Write a line.' },
+        },
+        {
+          id: 'generate',
+          type: 'ai.generate-text',
+          name: 'Generate',
+          position: { x: 200, y: 0 },
+          config: {
+            provider: 'gemini',
+            model: 'gemini-3.8-flash',
+            temperature: 0.2,
+            retryCount: 0,
+          },
+        },
+      ],
+      edges: [
+        {
+          id: 'prompt-generate',
+          source: 'prompt',
+          sourceHandle: 'prompt',
+          target: 'generate',
+          targetHandle: 'prompt',
+        },
+      ],
+    }
+
+    const result = await runWorkflow(definition)
+
+    expect(result.status).toBe('succeeded')
+    expect(result.records.at(-1)?.outputs?.text.value).toBe('A concise answer.')
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/models/gemini-3.8-flash:generateContent')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty(
+      'generationConfig',
+    )
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+    })
+  })
+
   it('accepts prompt plus multiple image references on one generation node', async () => {
     const definition: WorkflowDefinition = {
       version: 1,
