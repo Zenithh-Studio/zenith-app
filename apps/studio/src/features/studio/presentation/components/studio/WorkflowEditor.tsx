@@ -68,7 +68,7 @@ import {
   useState,
   type SyntheticEvent,
 } from 'react'
-import { nodeRegistry, providersFor, registryByType } from '@znith/contracts'
+import { paletteNodeRegistry, providersFor, registryByType } from '@znith/contracts'
 import type {
   ExecutionDocument,
   NodeExecutionRecord,
@@ -852,7 +852,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
   const filteredRegistry = useMemo(
     () =>
-      nodeRegistry.filter((item) =>
+      paletteNodeRegistry.filter((item) =>
         `${item.displayName} ${item.category}`.toLowerCase().includes(paletteSearch.toLowerCase()),
       ),
     [paletteSearch],
@@ -1535,7 +1535,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         </section>
 
         {inspectorOpen && (
-          <aside className="z-10 hidden w-[320px] shrink-0 flex-col border-l border-zinc-200 bg-white xl:flex">
+          <aside className="fixed bottom-0 right-0 top-14 z-30 flex w-80 max-w-[calc(100vw-1rem)] shrink-0 flex-col border-l border-zinc-200 bg-white shadow-2xl xl:static xl:z-10 xl:max-w-none xl:shadow-none">
             <div className="flex h-13 items-center justify-between border-b border-zinc-100 px-4">
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
                 {selectedNode ? 'Node inspector' : 'Execution'}
@@ -1921,7 +1921,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') setNodePickerOpen(false)
                   if (event.key === 'Enter') {
-                    const first = nodeRegistry.find((item) =>
+                    const first = paletteNodeRegistry.find((item) =>
                       `${item.displayName} ${item.description} ${item.category}`
                         .toLowerCase()
                         .includes(pickerSearch.toLowerCase()),
@@ -1934,7 +1934,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               />
             </div>
             <div className="max-h-[430px] overflow-y-auto border-t border-zinc-700 p-2">
-              {nodeRegistry
+              {paletteNodeRegistry
                 .filter((item) =>
                   `${item.displayName} ${item.description} ${item.category}`
                     .toLowerCase()
@@ -1965,7 +1965,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <div className="flex items-center gap-3 border-t border-zinc-700 px-4 py-2 text-[10px] text-zinc-500">
               <span>Enter Select</span>
               <span>Esc Close</span>
-              <span className="ml-auto">{nodeRegistry.length} nodes</span>
+              <span className="ml-auto">{paletteNodeRegistry.length} nodes</span>
             </div>
           </div>
         </div>

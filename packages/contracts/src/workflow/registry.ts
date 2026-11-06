@@ -209,8 +209,8 @@ export const nodeRegistry: NodeDefinition[] = [
     ],
     outputs: [output('video', 'Video', 'video')],
     defaultConfig: {
-      provider: 'replicate',
-      model: '',
+      provider: 'muse2api',
+      model: 'muse-video',
       prompt: '',
       aspectRatio: '16:9',
       duration: 5,
@@ -228,8 +228,8 @@ export const nodeRegistry: NodeDefinition[] = [
     inputs: [input('image', 'Image', 'image'), input('prompt', 'Prompt', 'text', false, false)],
     outputs: [output('video', 'Video', 'video')],
     defaultConfig: {
-      provider: 'replicate',
-      model: '',
+      provider: 'muse2api',
+      model: 'muse-video',
       prompt: '',
       aspectRatio: '16:9',
       duration: 5,
@@ -343,6 +343,23 @@ export const nodeRegistry: NodeDefinition[] = [
     available: true,
   },
 ]
+
+const workflowPaletteNodeTypes = new Set([
+  'input.prompt',
+  'input.image',
+  'processing.template',
+  'ai.generate-text',
+  'ai.analyze-image',
+  'ai.generate-image',
+  'ai.edit-image',
+  'ai.generate-video',
+  'ai.image-to-video',
+  'output.preview',
+])
+
+export const paletteNodeRegistry = nodeRegistry.filter((definition) =>
+  workflowPaletteNodeTypes.has(definition.type),
+)
 
 export const registryByType = new Map(
   nodeRegistry.map((definition) => [definition.type, definition]),

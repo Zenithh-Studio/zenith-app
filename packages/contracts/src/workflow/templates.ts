@@ -84,7 +84,7 @@ export const workflowTemplates: Record<
   },
   video: {
     name: 'AI Video Production',
-    description: 'A provider-ready text-to-video production pipeline.',
+    description: 'Generate a video from a prompt with the configured video provider.',
     category: 'video',
     definition: {
       version: 1,
@@ -92,11 +92,15 @@ export const workflowTemplates: Record<
         node('brief', 'input.prompt', 'Video prompt', 80, 160, {
           value: 'A glass perfume bottle floating through a cloud chamber.',
         }),
-        node('image', 'ai.generate-image', 'Generate keyframe', 430, 160),
-        node('video', 'ai.image-to-video', 'Animate keyframe', 780, 160),
-        node('save', 'output.save-video', 'Save video', 1130, 160),
+        node('video', 'ai.generate-video', 'Generate video', 500, 160, {
+          provider: 'muse2api',
+          model: 'muse-video',
+          prompt: '',
+          aspectRatio: '16:9',
+          duration: 5,
+        }),
       ],
-      edges: [],
+      edges: [edge('brief', 'prompt', 'video', 'prompt')],
     },
   },
 }
