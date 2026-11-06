@@ -3339,6 +3339,12 @@ function MediaConfiguration({
   const modality =
     type === 'ai.analyze-image' ? 'vision' : type.includes('video') ? 'video' : 'image'
   const providers = providersFor(modality)
+  const selectedProvider = providers.find((provider) => provider.id === config.provider)
+  const providerModels = selectedProvider?.models[modality] ?? []
+  const currentModel = String(config.model || '')
+  const hasModelOptions =
+    providerModels.length > 0 && (!currentModel || providerModels.includes(currentModel))
+  const isVideoGenerator = type === 'ai.generate-video' || type === 'ai.image-to-video'
   const ratios = imageAspectRatios
   return (
     <div className="space-y-4">
@@ -3388,9 +3394,29 @@ function MediaConfiguration({
               onChange={(event) => {
                 const provider = providers.find((item) => item.id === event.target.value)
                 const defaultModel = provider?.models[modality]?.[0]
+                const nextDurationOptions = modelDurationOptions(
+                  event.target.value,
+                  defaultModel || '',
+                )
+                const nextResolutionOptions = modelResolutionOptions(
+                  event.target.value,
+                  defaultModel || '',
+                )
                 onChangeMany({
                   provider: event.target.value,
                   ...(defaultModel ? { model: defaultModel } : {}),
+                  ...(isVideoGenerator && defaultModel
+                    ? {
+                        duration: nextDurationOptions.includes(Number(config.duration))
+                          ? Number(config.duration)
+                          : defaultModelDuration(event.target.value, defaultModel),
+                        resolution: nextResolutionOptions.includes(String(config.resolution))
+                          ? config.resolution
+                          : (nextResolutionOptions[0] ?? '720p'),
+                        selectedOutput: null,
+                        outputRevision: nextOutputRevision(),
+                      }
+                    : {}),
                 })
               }}
               className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs outline-none"
@@ -3441,18 +3467,58 @@ function MediaConfiguration({
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Model
           </span>
-          <input
-            value={String(config.model || '')}
-            onChange={(event) => onChange('model', event.target.value)}
-            placeholder={
-              type.includes('video')
-                ? config.provider === 'muse2api'
-                  ? 'muse-video'
-                  : 'Replicate model version ID'
-                : 'Model ID'
-            }
-            className="h-10 w-full rounded-xl border border-zinc-200 px-3 text-xs outline-none focus:border-violet-300"
-          />
+          {hasModelOptions ? (
+            <select
+              aria-label="Model"
+              value={currentModel || providerModels[0]}
+              onChange={(event) => {
+                const nextModel = event.target.value
+                const durationOptions = modelDurationOptions(
+                  String(config.provider || ''),
+                  nextModel,
+                )
+                const resolutionOptions = modelResolutionOptions(
+                  String(config.provider || ''),
+                  nextModel,
+                )
+                onChangeMany({
+                  model: nextModel,
+                  ...(isVideoGenerator
+                    ? {
+                        duration: durationOptions.includes(Number(config.duration))
+                          ? Number(config.duration)
+                          : defaultModelDuration(String(config.provider || ''), nextModel),
+                        resolution: resolutionOptions.includes(String(config.resolution))
+                          ? config.resolution
+                          : (resolutionOptions[0] ?? '720p'),
+                        selectedOutput: null,
+                        outputRevision: nextOutputRevision(),
+                      }
+                    : {}),
+                })
+              }}
+              className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs outline-none focus:border-violet-300"
+            >
+              {providerModels.map((providerModel) => (
+                <option key={providerModel} value={providerModel}>
+                  {displayModelName(providerModel)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={currentModel}
+              onChange={(event) => onChange('model', event.target.value)}
+              placeholder={
+                type.includes('video')
+                  ? config.provider === 'muse2api'
+                    ? 'muse-video'
+                    : 'Custom model ID'
+                  : 'Model ID'
+              }
+              className="h-10 w-full rounded-xl border border-zinc-200 px-3 text-xs outline-none focus:border-violet-300"
+            />
+          )}
         </label>
       )}
       {config.provider === 'muse2api' && (
