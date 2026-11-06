@@ -21,6 +21,8 @@ export type ExecutionUpdateRecord = Partial<
   >
 >
 
+export type WorkflowRunClaim = 'claimed' | 'reclaimed' | null
+
 export interface WorkflowRepository {
   listWorkflows(search?: string): Promise<WorkflowDocument[]>
   findWorkflowById(id: string): Promise<WorkflowDocument | null>
@@ -30,5 +32,10 @@ export interface WorkflowRepository {
   listExecutions(workflowId: string, limit: number): Promise<ExecutionDocument[]>
   createExecution(data: ExecutionCreateRecord): Promise<ExecutionDocument>
   updateExecution(id: string, data: ExecutionUpdateRecord): Promise<ExecutionDocument>
+  claimWorkflowRun(
+    id: string,
+    lastExecutionAt: string,
+    staleBefore: string,
+  ): Promise<WorkflowRunClaim>
   updateWorkflowRunState(id: string, status: WorkflowStatus, lastExecutionAt: string): Promise<void>
 }

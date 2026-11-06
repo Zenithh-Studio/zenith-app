@@ -2,6 +2,7 @@ import {
   createWorkflowRequestSchema,
   executeWorkflowRequestSchema,
   updateWorkflowRequestSchema,
+  validateWorkflowDefinition,
   workflowTemplates,
 } from '@znith/contracts'
 import { cloneValue } from '@znith/utils'
@@ -13,7 +14,6 @@ import type {
   NodeExecutionRecord,
   WorkflowDefinition,
   WorkflowDocument,
-  WorkflowStatus,
 } from '@znith/contracts'
 import type { EngineResult, WorkflowRunOptions } from './workflow-service.types'
 import type { WorkflowMediaPersister } from './workflow-media-persister'
@@ -33,6 +33,24 @@ export interface WorkflowRunner {
 
 export interface WorkflowRunResponse extends EngineResult {
   executionId: string
+}
+
+const activeWorkflowRuns = new Set<string>()
+const staleWorkflowRunMs = 6 * 60 * 1000
+const workflowRunHeartbeatMs = 60 * 1000
+
+export class WorkflowAlreadyRunningError extends Error {
+  constructor() {
+    super('This workflow is already running.')
+    this.name = 'WorkflowAlreadyRunningError'
+  }
+}
+
+export class WorkflowValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorkflowValidationError'
+  }
 }
 
 export class WorkflowService {
@@ -85,82 +103,185 @@ export class WorkflowService {
 
   async execute(id: string, input: ExecuteWorkflowRequest): Promise<WorkflowRunResponse | null> {
     const validatedInput = executeWorkflowRequestSchema.parse(input)
-    const workflow = await this.repository.findWorkflowById(id)
-    if (!workflow) return null
+    if (activeWorkflowRuns.has(id)) throw new WorkflowAlreadyRunningError()
+    activeWorkflowRuns.add(id)
 
-    const startedAt = this.now()
-    const snapshot = cloneValue(workflow.definition)
-    const executionInput: ExecutionCreateRecord = {
-      workflow: id,
-      status: 'running',
-      scope: validatedInput.targetNodeId
-        ? `node:${validatedInput.targetNodeId}:with-dependencies`
-        : 'workflow',
-      startedAt: startedAt.toISOString(),
-      snapshot,
-      nodeRecords: [],
-      logs: [],
-    }
-    const execution = await this.repository.createExecution(executionInput)
-    await this.repository.updateWorkflowRunState(id, 'running', startedAt.toISOString())
-    logServerEvent('info', 'workflow.execution.started', {
-      workflowId: id,
-      executionId: execution.id,
-      nodeCount: snapshot.nodes.length,
-    })
-
-    const nodeRecordsById = new Map<string, NodeExecutionRecord>()
-    let nodeRecordWrites = Promise.resolve()
-    const onNodeRecord = async (record: NodeExecutionRecord) => {
-      nodeRecordsById.set(record.nodeId, cloneValue(record))
-      const nodeRecords = [...nodeRecordsById.values()].map((nodeRecord) => cloneValue(nodeRecord))
-      nodeRecordWrites = nodeRecordWrites
-        .then(async () => {
-          await this.repository.updateExecution(execution.id, { nodeRecords })
-        })
-        .catch(() => undefined)
-      await nodeRecordWrites
+    let claimed = false
+    let execution: ExecutionDocument | undefined
+    let snapshot: WorkflowDefinition | undefined
+    let startedAt: Date | undefined
+    let finishing = false
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let heartbeatWrites: Promise<void> = Promise.resolve()
+    let nodeRecordWrites: Promise<void> = Promise.resolve()
+    const stopHeartbeat = () => {
+      finishing = true
+      if (heartbeat) clearInterval(heartbeat)
     }
 
-    const runResult = await this.runWorkflow(snapshot, validatedInput.targetNodeId, {
-      ...(this.mediaPersister
-        ? {
-            persistNodeOutputs: (node, outputs) =>
-              this.mediaPersister!.persist(id, execution.id, node, outputs),
-          }
-        : {}),
-      onNodeRecord,
-    })
-    await nodeRecordWrites
-    const completedAt = this.now()
-    const nodeRecords: NodeExecutionRecord[] = runResult.records
-    const durationMs = completedAt.getTime() - startedAt.getTime()
-    await this.repository.updateExecution(execution.id, {
-      status: runResult.status,
-      completedAt: completedAt.toISOString(),
-      durationMs,
-      nodeRecords,
-      logs: runResult.logs,
-      error: runResult.error,
-    })
-    await this.repository.updateWorkflowRunState(
-      id,
-      runResult.status as WorkflowStatus,
-      completedAt.toISOString(),
-    )
-    logServerEvent(
-      runResult.status === 'failed' ? 'warn' : 'info',
-      'workflow.execution.completed',
-      {
+    try {
+      const workflow = await this.repository.findWorkflowById(id)
+      if (!workflow) return null
+
+      snapshot = cloneValue(workflow.definition)
+      try {
+        validateWorkflowDefinition(snapshot, validatedInput.targetNodeId)
+      } catch (error) {
+        throw new WorkflowValidationError(
+          error instanceof Error ? error.message : 'Invalid workflow definition.',
+        )
+      }
+
+      startedAt = this.now()
+      const startedAtISO = startedAt.toISOString()
+      const claim = await this.repository.claimWorkflowRun(
+        id,
+        startedAtISO,
+        new Date(startedAt.getTime() - staleWorkflowRunMs).toISOString(),
+      )
+      if (!claim) throw new WorkflowAlreadyRunningError()
+      claimed = true
+
+      if (claim === 'reclaimed') {
+        const recoveredAt = this.now()
+        const previousExecutions = await this.repository.listExecutions(id, 20)
+        for (const previousExecution of previousExecutions) {
+          if (previousExecution.status !== 'running') continue
+          await this.repository.updateExecution(previousExecution.id, {
+            status: 'interrupted',
+            completedAt: recoveredAt.toISOString(),
+            durationMs: Math.max(
+              0,
+              recoveredAt.getTime() - new Date(previousExecution.startedAt).getTime(),
+            ),
+            error: 'Execution was interrupted because its server process stopped.',
+          })
+        }
+      }
+
+      const executionInput: ExecutionCreateRecord = {
+        workflow: id,
+        status: 'running',
+        scope: validatedInput.targetNodeId
+          ? `node:${validatedInput.targetNodeId}:with-dependencies`
+          : 'workflow',
+        startedAt: startedAtISO,
+        snapshot,
+        nodeRecords: [],
+        logs: [],
+      }
+      execution = await this.repository.createExecution(executionInput)
+      logServerEvent('info', 'workflow.execution.started', {
         workflowId: id,
         executionId: execution.id,
-        status: runResult.status,
-        durationMs,
         nodeCount: snapshot.nodes.length,
-        failedNodeCount: nodeRecords.filter((record) => record.status === 'failed').length,
-      },
-    )
+      })
 
-    return { executionId: execution.id, ...runResult }
+      const heartbeatRun = () => {
+        if (finishing) return
+        heartbeatWrites = heartbeatWrites
+          .then(async () => {
+            if (!finishing) {
+              await this.repository.updateWorkflowRunState(id, 'running', this.now().toISOString())
+            }
+          })
+          .catch(() => undefined)
+      }
+      heartbeat = setInterval(heartbeatRun, workflowRunHeartbeatMs)
+      heartbeat.unref?.()
+
+      const nodeRecordsById = new Map<string, NodeExecutionRecord>()
+      const onNodeRecord = async (record: NodeExecutionRecord) => {
+        nodeRecordsById.set(record.nodeId, cloneValue(record))
+        const nodeRecords = [...nodeRecordsById.values()].map((nodeRecord) =>
+          cloneValue(nodeRecord),
+        )
+        nodeRecordWrites = nodeRecordWrites
+          .then(async () => {
+            await this.repository.updateExecution(execution!.id, { nodeRecords })
+          })
+          .catch(() => undefined)
+        await nodeRecordWrites
+      }
+
+      let runResult: EngineResult
+      try {
+        runResult = await this.runWorkflow(snapshot, validatedInput.targetNodeId, {
+          ...(this.mediaPersister
+            ? {
+                persistNodeOutputs: (node, outputs) =>
+                  this.mediaPersister!.persist(id, execution!.id, node, outputs),
+              }
+            : {}),
+          onNodeRecord,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Workflow execution failed.'
+        runResult = {
+          status: 'failed',
+          records: [...nodeRecordsById.values()],
+          logs: [{ at: this.now().toISOString(), level: 'error', message }],
+          error: message,
+        }
+      }
+      await nodeRecordWrites
+      stopHeartbeat()
+      await heartbeatWrites
+
+      const completedAt = this.now()
+      const nodeRecords: NodeExecutionRecord[] = runResult.records
+      const durationMs = completedAt.getTime() - startedAt.getTime()
+      await this.repository.updateExecution(execution.id, {
+        status: runResult.status,
+        completedAt: completedAt.toISOString(),
+        durationMs,
+        nodeRecords,
+        logs: runResult.logs,
+        error: runResult.error,
+      })
+      await this.repository.updateWorkflowRunState(id, runResult.status, completedAt.toISOString())
+      logServerEvent(
+        runResult.status === 'failed' ? 'warn' : 'info',
+        'workflow.execution.completed',
+        {
+          workflowId: id,
+          executionId: execution.id,
+          status: runResult.status,
+          durationMs,
+          nodeCount: snapshot.nodes.length,
+          failedNodeCount: nodeRecords.filter((record) => record.status === 'failed').length,
+        },
+      )
+
+      return { executionId: execution.id, ...runResult }
+    } catch (error) {
+      stopHeartbeat()
+      await Promise.all([heartbeatWrites, nodeRecordWrites])
+      if (claimed && startedAt) {
+        const failedAt = this.now()
+        const message = error instanceof Error ? error.message : 'Workflow execution failed.'
+        if (execution) {
+          try {
+            await this.repository.updateExecution(execution.id, {
+              status: 'failed',
+              completedAt: failedAt.toISOString(),
+              durationMs: Math.max(0, failedAt.getTime() - startedAt.getTime()),
+              error: message,
+            })
+          } catch {
+            // Preserve the original execution error if persistence is unavailable.
+          }
+        }
+        try {
+          await this.repository.updateWorkflowRunState(id, 'failed', failedAt.toISOString())
+        } catch {
+          // The stale-run lease will recover the workflow if the database is unavailable.
+        }
+      }
+      throw error
+    } finally {
+      stopHeartbeat()
+      activeWorkflowRuns.delete(id)
+    }
   }
 }

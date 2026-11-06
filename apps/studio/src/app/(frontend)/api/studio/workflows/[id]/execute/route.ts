@@ -2,6 +2,7 @@ import { executeWorkflowRequestSchema } from '@znith/contracts'
 import { getWorkflowService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
 import { withContextApiLogging } from '@/lib/server-logger'
+import { WorkflowAlreadyRunningError, WorkflowValidationError } from '@/server'
 
 type WorkflowExecutionRouteContext = { params: Promise<{ id: string }> }
 
@@ -25,6 +26,12 @@ async function executeWorkflow(request: Request, context: WorkflowExecutionRoute
     if (!execution) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json(execution, { status: execution.status === 'failed' ? 422 : 200 })
   } catch (error) {
+    if (error instanceof WorkflowAlreadyRunningError) {
+      return Response.json({ error: error.message }, { status: 409 })
+    }
+    if (error instanceof WorkflowValidationError) {
+      return Response.json({ error: error.message }, { status: 422 })
+    }
     return backendUnavailableResponse(error, '/api/studio/workflows/[id]/execute')
   }
 }

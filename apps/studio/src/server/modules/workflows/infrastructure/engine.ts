@@ -2,7 +2,7 @@ import 'server-only'
 
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
-import { registryByType, workflowDefinitionSchema } from '@znith/contracts'
+import { registryByType, validateWorkflowDefinition } from '@znith/contracts'
 import { clampNumber } from '@znith/utils'
 import type {
   NodeExecutionRecord,
@@ -17,67 +17,6 @@ import type { WorkflowRunOptions } from '../application/workflow-service.types'
 export { workflowDefinitionSchema } from '@znith/contracts'
 
 export type EngineResult = WorkflowRunResult
-
-function validateAndSort(definition: WorkflowDefinition, targetNodeId?: string) {
-  workflowDefinitionSchema.parse(definition)
-  const nodes = new Map(definition.nodes.map((node) => [node.id, node]))
-  if (nodes.size !== definition.nodes.length)
-    throw new Error('Duplicate node identifiers are not allowed.')
-
-  for (const edge of definition.edges) {
-    const sourceNode = nodes.get(edge.source)
-    const targetNode = nodes.get(edge.target)
-    if (!sourceNode || !targetNode) throw new Error(`Edge ${edge.id} references a missing node.`)
-    const sourcePort = registryByType
-      .get(sourceNode.type)
-      ?.outputs.find((port) => port.id === edge.sourceHandle)
-    const targetPort = registryByType
-      .get(targetNode.type)
-      ?.inputs.find((port) => port.id === edge.targetHandle)
-    if (!sourcePort || !targetPort || sourcePort.dataType !== targetPort.dataType) {
-      throw new Error(`Edge ${edge.id} connects incompatible ports.`)
-    }
-  }
-
-  let included = new Set(nodes.keys())
-  if (targetNodeId) {
-    if (!nodes.has(targetNodeId)) throw new Error('The selected node no longer exists.')
-    included = new Set([targetNodeId])
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const edge of definition.edges) {
-        if (included.has(edge.target) && !included.has(edge.source)) {
-          included.add(edge.source)
-          changed = true
-        }
-      }
-    }
-  }
-
-  const indegree = new Map([...included].map((id) => [id, 0]))
-  for (const edge of definition.edges) {
-    if (included.has(edge.source) && included.has(edge.target)) {
-      indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
-    }
-  }
-  const queue = [...indegree].filter(([, degree]) => degree === 0).map(([id]) => id)
-  const sorted: WorkflowNode[] = []
-  while (queue.length) {
-    const id = queue.shift()!
-    sorted.push(nodes.get(id)!)
-    for (const edge of definition.edges.filter(
-      (item) => item.source === id && included.has(item.target),
-    )) {
-      const next = (indegree.get(edge.target) ?? 0) - 1
-      indegree.set(edge.target, next)
-      if (next === 0) queue.push(edge.target)
-    }
-  }
-  if (sorted.length !== included.size)
-    throw new Error('Cycles are not supported in executable workflows.')
-  return sorted
-}
 
 function resolveInputs(
   node: WorkflowNode,
@@ -1163,7 +1102,7 @@ export async function runWorkflow(
   const logs: EngineResult['logs'] = []
   const outputs = new Map<string, Record<string, NodeValue>>()
   try {
-    const sorted = validateAndSort(definition, targetNodeId)
+    const sorted = validateWorkflowDefinition(definition, targetNodeId)
     const included = new Set(sorted.map((node) => node.id))
     const pending = new Map(sorted.map((node) => [node.id, node]))
     const finished = new Map<string, NodeExecutionRecord>()

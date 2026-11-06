@@ -98,6 +98,20 @@ class MemoryWorkflowRepository implements WorkflowRepository {
     return updated
   }
 
+  async claimWorkflowRun(id: string, lastExecutionAt: string, staleBefore: string) {
+    const current = this.workflows.get(id)
+    if (!current) return null
+    const stale =
+      current.status === 'running' &&
+      current.lastExecutionAt != null &&
+      current.lastExecutionAt < staleBefore
+    if (current.status === 'running' && !stale) return null
+    const updated = { ...current, status: 'running' as const, lastExecutionAt }
+    this.workflows.set(id, updated)
+    this.workflowWrites.push({ status: 'running', lastExecutionAt })
+    return stale ? ('reclaimed' as const) : ('claimed' as const)
+  }
+
   async updateWorkflowRunState(
     id: string,
     status: WorkflowDocument['status'],
@@ -174,6 +188,94 @@ describe('WorkflowService', () => {
       status: 'succeeded',
       lastExecutionAt: '2026-11-05T00:00:00.250Z',
     })
+  })
+
+  it('rejects concurrent execution requests before creating a second execution', async () => {
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument())
+    let finishRun: (() => void) | undefined
+    const runWorkflow = vi.fn(
+      () =>
+        new Promise<WorkflowRunResult>((resolve) => {
+          finishRun = () => resolve(successfulRun)
+        }),
+    )
+    const service = new WorkflowService(repository, runWorkflow)
+
+    const firstRun = service.execute('workflow-string-id', {})
+    await vi.waitFor(() => expect(runWorkflow).toHaveBeenCalledOnce())
+    await expect(service.execute('workflow-string-id', {})).rejects.toThrow(
+      'This workflow is already running.',
+    )
+    finishRun?.()
+    await expect(firstRun).resolves.toMatchObject({ status: 'succeeded' })
+    expect(repository.executionCreates).toHaveLength(1)
+  })
+
+  it('validates the graph before claiming a run or creating an execution', async () => {
+    const duplicateNodeDefinition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'duplicate',
+          type: 'input.prompt',
+          name: 'Prompt one',
+          position: { x: 0, y: 0 },
+          config: {},
+        },
+        {
+          id: 'duplicate',
+          type: 'input.text',
+          name: 'Prompt two',
+          position: { x: 0, y: 100 },
+          config: {},
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(duplicateNodeDefinition))
+    const runWorkflow = vi.fn(async () => successfulRun)
+    const service = new WorkflowService(repository, runWorkflow)
+
+    await expect(service.execute('workflow-string-id', {})).rejects.toThrow(
+      'Duplicate node identifier',
+    )
+    expect(repository.executionCreates).toEqual([])
+    expect(repository.workflows.get('workflow-string-id')?.status).toBe('idle')
+    expect(runWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('marks a stale execution interrupted before reclaiming the workflow', async () => {
+    const workflow = createWorkflowDocument()
+    workflow.status = 'running'
+    workflow.lastExecutionAt = '2026-11-05T00:00:00.000Z'
+    const repository = new MemoryWorkflowRepository(workflow)
+    const staleExecution: ExecutionDocument = {
+      id: 'execution-stale',
+      workflow: workflow.id,
+      status: 'running',
+      scope: 'workflow',
+      startedAt: '2026-11-05T00:00:00.000Z',
+      snapshot: workflow.definition,
+      nodeRecords: [],
+      logs: [],
+      createdAt: '2026-11-05T00:00:00.000Z',
+      updatedAt: '2026-11-05T00:00:00.000Z',
+    }
+    repository.executions.set(staleExecution.id, staleExecution)
+    const service = new WorkflowService(
+      repository,
+      vi.fn(async () => successfulRun),
+      () => new Date('2026-11-05T01:00:00.000Z'),
+    )
+
+    const response = await service.execute(workflow.id, {})
+
+    expect(response?.status).toBe('succeeded')
+    expect(repository.executions.get(staleExecution.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'Execution was interrupted because its server process stopped.',
+    })
+    expect(repository.executionCreates).toHaveLength(1)
   })
 
   it('persists node progress records as nodes start and complete', async () => {

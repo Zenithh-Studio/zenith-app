@@ -674,6 +674,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const mediaInput = useRef<HTMLInputElement>(null)
   const uploadTarget = useRef<'new' | 'selected'>('new')
+  const runLockRef = useRef(false)
   const runStartedAtRef = useRef<string | null>(null)
   const [undoStack, setUndoStack] = useState<WorkflowDefinition[]>([])
   const [redoStack, setRedoStack] = useState<WorkflowDefinition[]>([])
@@ -839,69 +840,82 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   }, [definitionFromState, workflow, workflowId])
 
   const executeRun = async (targetNodeId?: string) => {
-    if (!(await save())) return
+    if (runLockRef.current) return
+    runLockRef.current = true
     setRunning(true)
     setError('')
-    const scopeNodeIds = runScopeNodeIds(definitionFromState(), targetNodeId)
-    setRunScopeIds([...scopeNodeIds])
-    const startedAt = new Date().toISOString()
-    runStartedAtRef.current = startedAt
-    setRunStartedAt(startedAt)
-    setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: scopeNodeIds.has(node.id)
-          ? {
-              ...node.data,
-              record: {
-                ...node.data.record,
-                nodeId: node.id,
-                status: 'queued',
-                error: undefined,
+    try {
+      if (!(await save())) return
+
+      const scopeNodeIds = runScopeNodeIds(definitionFromState(), targetNodeId)
+      setRunScopeIds([...scopeNodeIds])
+      const startedAt = new Date().toISOString()
+      runStartedAtRef.current = startedAt
+      setRunStartedAt(startedAt)
+      setNodes((current) =>
+        current.map((node) => ({
+          ...node,
+          data: scopeNodeIds.has(node.id)
+            ? {
+                ...node.data,
+                record: {
+                  ...node.data.record,
+                  nodeId: node.id,
+                  status: 'queued',
+                  error: undefined,
+                },
+              }
+            : node.data,
+        })),
+      )
+
+      try {
+        const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetNodeId }),
+        })
+        const responseBody = await response.json()
+        const records: NodeExecutionRecord[] = responseBody.records ?? []
+        setNodes((current) =>
+          current.map((node) => {
+            const nextRecord = records.find((record) => record.nodeId === node.id)
+            if (!nextRecord) return node
+            const previousOutputs = node.data.record?.outputs
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                record: {
+                  ...nextRecord,
+                  outputs: nextRecord.outputs ?? previousOutputs,
+                },
               },
             }
-          : node.data,
-      })),
-    )
-    try {
-      const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetNodeId }),
-      })
-      const responseBody = await response.json()
-      const records: NodeExecutionRecord[] = responseBody.records ?? []
-      setNodes((current) =>
-        current.map((node) => {
-          const nextRecord = records.find((record) => record.nodeId === node.id)
-          if (!nextRecord) return node
-          const previousOutputs = node.data.record?.outputs
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              record: {
-                ...nextRecord,
-                outputs: nextRecord.outputs ?? previousOutputs,
-              },
-            },
-          }
-        }),
-      )
-      if (!response.ok) setError(responseBody.error || 'Execution failed.')
-      await load()
+          }),
+        )
+        if (!response.ok) setError(responseBody.error || 'Execution failed.')
+        await load()
+      } catch {
+        setError('Could not confirm workflow execution. Checking saved outputs…')
+        try {
+          await load()
+        } catch {
+          // Keep the execution status visible when a follow-up read also fails.
+        }
+      }
     } catch {
-      setError('Could not confirm workflow execution. Checking saved outputs…')
-      await load()
+      setError('Could not start workflow execution.')
     } finally {
       runStartedAtRef.current = null
       setRunStartedAt(null)
       setRunning(false)
+      runLockRef.current = false
     }
   }
 
   const run = async (targetNodeId?: string) => {
-    if (running) return
+    if (running || runLockRef.current) return
     const definition = definitionFromState()
     const scopeNodeIds = runScopeNodeIds(definition, targetNodeId)
     const previousMediaCount = nodes.filter(

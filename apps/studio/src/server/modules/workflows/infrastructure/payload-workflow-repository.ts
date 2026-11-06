@@ -23,7 +23,17 @@ interface PayloadMutationOptions {
   id?: string
 }
 
+interface PayloadWorkflowDatabaseApi {
+  updateOne(options: {
+    collection: 'workflows'
+    where: Record<string, unknown>
+    data: Record<string, unknown>
+    options: { atomic: true }
+  }): Promise<unknown | null>
+}
+
 export interface PayloadLocalApi {
+  db: PayloadWorkflowDatabaseApi
   find(options: PayloadQueryOptions): Promise<{ docs: unknown[] }>
   findByID(options: {
     collection: 'workflows'
@@ -134,6 +144,33 @@ export class PayloadWorkflowRepository implements WorkflowRepository {
       data: data as Record<string, unknown>,
     })
     return asDocument<ExecutionDocument>(document)
+  }
+
+  async claimWorkflowRun(id: string, lastExecutionAt: string, staleBefore: string) {
+    const data = { status: 'running', lastExecutionAt, updatedAt: lastExecutionAt }
+    const claimed = await this.payloadClient.db.updateOne({
+      collection: 'workflows',
+      where: {
+        and: [{ id: { equals: id } }, { status: { not_equals: 'running' } }],
+      },
+      data,
+      options: { atomic: true },
+    })
+    if (claimed) return 'claimed' as const
+
+    const reclaimed = await this.payloadClient.db.updateOne({
+      collection: 'workflows',
+      where: {
+        and: [
+          { id: { equals: id } },
+          { status: { equals: 'running' } },
+          { lastExecutionAt: { less_than: staleBefore } },
+        ],
+      },
+      data,
+      options: { atomic: true },
+    })
+    return reclaimed ? ('reclaimed' as const) : null
   }
 
   async updateWorkflowRunState(
