@@ -694,6 +694,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [running, setRunning] = useState(false)
   const [runStartedAt, setRunStartedAt] = useState<string | null>(null)
   const [runScopeIds, setRunScopeIds] = useState<string[]>([])
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<{
+    completed: number
+    total: number
+  } | null>(null)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
   const [runConfirmation, setRunConfirmation] = useState<{
@@ -1090,33 +1094,93 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     setContextMenu(null)
   }
 
-  const uploadMedia = async (file: File) => {
+  const uploadMedia = async (files: File[]) => {
+    if (!files.length || mediaUploadProgress) return
     setError('')
-    const form = new FormData()
-    form.set('file', file)
-    form.set('alt', file.name)
-    const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
-    const responseBody = await response.json()
-    if (!response.ok) return setError(responseBody.error || 'Could not upload media.')
-    const config = {
-      assetId: responseBody.media.id,
-      url: mediaSource(responseBody.media.url, responseBody.media.id, responseBody.media.filename),
-      fileName: responseBody.media.filename || file.name,
-      mimeType: responseBody.media.mimeType || file.type,
-      ...(file.type.startsWith('image/') &&
-      responseBody.media.width > 0 &&
-      responseBody.media.height > 0
-        ? { imageWidth: responseBody.media.width, imageHeight: responseBody.media.height }
-        : {}),
+    const failures: string[] = []
+    const uploadedNodes: StudioNode[] = []
+    let uploadedCount = 0
+    const basePosition = pickerPosition ?? {
+      x: 120 + nodes.length * 36,
+      y: 120 + nodes.length * 26,
     }
-    if (
-      uploadTarget.current === 'selected' &&
-      selectedNode &&
-      ['input.image', 'input.video'].includes(selectedNode.data.workflowNode.type)
-    ) {
-      updateSelected({ config: { ...selectedNode.data.workflowNode.config, ...config } })
-    } else {
-      addNode(file.type.startsWith('video/') ? 'input.video' : 'input.image', undefined, config)
+
+    for (const [index, file] of files.entries()) {
+      setMediaUploadProgress({ completed: index + 1, total: files.length })
+      try {
+        const form = new FormData()
+        form.set('file', file)
+        form.set('alt', file.name)
+        const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
+        const responseBody = await response.json()
+        if (!response.ok || !responseBody.media) {
+          failures.push(`${file.name}: ${responseBody.error || 'Could not upload media.'}`)
+          continue
+        }
+
+        const media = responseBody.media
+        const config = {
+          assetId: media.id,
+          url: mediaSource(media.url, media.id, media.filename),
+          fileName: media.filename || file.name,
+          mimeType: media.mimeType || file.type,
+          ...(file.type.startsWith('image/') && media.width > 0 && media.height > 0
+            ? { imageWidth: media.width, imageHeight: media.height }
+            : {}),
+        }
+        const type = file.type.startsWith('video/') ? 'input.video' : 'input.image'
+        if (
+          files.length === 1 &&
+          uploadTarget.current === 'selected' &&
+          selectedNode?.data.workflowNode.type === type
+        ) {
+          updateSelected({ config: { ...selectedNode.data.workflowNode.config, ...config } })
+        } else {
+          const definition = registryByType.get(type)
+          if (!definition?.available) {
+            failures.push(`${file.name}: This media input node is unavailable.`)
+            continue
+          }
+          const id = `${type.replaceAll('.', '-')}-${crypto.randomUUID().slice(0, 8)}`
+          const position = {
+            x: basePosition.x + uploadedNodes.length * 48,
+            y: basePosition.y + uploadedNodes.length * 42,
+          }
+          const workflowNode: WorkflowNode = {
+            id,
+            type,
+            name: definition.displayName,
+            slug: `${definition.displayName.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}-${id.slice(-4)}`,
+            position,
+            config: { ...cloneValue(definition.defaultConfig), ...config },
+          }
+          uploadedNodes.push({
+            id,
+            type: 'studioNode',
+            position,
+            data: { workflowNode },
+          })
+        }
+        uploadedCount += 1
+      } catch {
+        failures.push(`${file.name}: Could not upload media.`)
+      }
+    }
+
+    if (uploadedNodes.length) {
+      captureHistory()
+      setNodes((current) => [...current, ...uploadedNodes])
+      setSelectedId(uploadedNodes.at(-1)?.id ?? null)
+      setInspectorOpen(true)
+      setDirty(true)
+      setNodePickerOpen(false)
+      setContextMenu(null)
+    }
+    setMediaUploadProgress(null)
+    if (failures.length) {
+      setError(
+        `Uploaded ${uploadedCount} of ${files.length} files. ${failures.slice(0, 3).join(' ')}${failures.length > 3 ? ` And ${failures.length - 3} more failed.` : ''}`,
+      )
     }
   }
 
@@ -1442,11 +1506,12 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         <input
           ref={mediaInput}
           type="file"
+          multiple
           accept="image/*,video/*"
           className="hidden"
           onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) uploadMedia(file)
+            const files = Array.from(event.target.files ?? [])
+            if (files.length) void uploadMedia(files)
             event.target.value = ''
           }}
         />
@@ -1513,6 +1578,16 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <Save size={14} />{' '}
             <span className="hidden sm:inline">{saving ? 'Saving' : 'Save'}</span>
           </button>
+          {mediaUploadProgress ? (
+            <div
+              aria-live="polite"
+              className="hidden items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-medium text-blue-700 sm:flex"
+              role="status"
+            >
+              <LoaderCircle size={12} className="animate-spin" />
+              Uploading {mediaUploadProgress.completed}/{mediaUploadProgress.total}
+            </div>
+          ) : null}
           {running ? (
             <div
               aria-live="polite"
@@ -1853,6 +1928,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                       config={selectedNode.data.workflowNode.config}
                       onChange={updateConfig}
                       onChangeMany={updateConfigMany}
+                      uploading={Boolean(mediaUploadProgress)}
                       onUpload={() => {
                         uploadTarget.current = 'selected'
                         mediaInput.current?.click()
@@ -2256,12 +2332,14 @@ function MediaConfiguration({
   config,
   onChange,
   onChangeMany,
+  uploading,
   onUpload,
 }: {
   type: string
   config: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
   onChangeMany: (patch: Record<string, unknown>) => void
+  uploading: boolean
   onUpload: () => void
 }) {
   const isInput = type === 'input.image' || type === 'input.video'
@@ -2295,10 +2373,12 @@ function MediaConfiguration({
             )
           ) : null}
           <button
+            disabled={uploading}
             onClick={onUpload}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-60"
           >
-            <Upload size={14} /> {config.url ? 'Replace media' : 'Choose / upload media'}
+            {uploading ? <LoaderCircle size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploading ? 'Uploading media' : config.url ? 'Replace media' : 'Choose / upload media'}
           </button>
           {config.fileName && (
             <p className="truncate text-[10px] text-zinc-400">{String(config.fileName)}</p>

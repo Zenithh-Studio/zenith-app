@@ -27,6 +27,9 @@ export function AssetLibrary() {
   const [assets, setAssets] = useState<AssetDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(
+    null,
+  )
   const input = useRef<HTMLInputElement>(null)
   const load = useCallback(async () => {
     const response = await fetch('/api/studio/assets')
@@ -40,14 +43,34 @@ export function AssetLibrary() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
-  const upload = async (file: File) => {
-    const form = new FormData()
-    form.set('file', file)
-    form.set('alt', file.name)
-    const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
-    const responseBody = await response.json()
-    if (!response.ok) setError(responseBody.error || 'Could not upload asset.')
-    else {
+  const upload = async (files: File[]) => {
+    if (!files.length || uploadProgress) return
+    setError('')
+    const failures: string[] = []
+    let uploadedCount = 0
+
+    for (const [index, file] of files.entries()) {
+      setUploadProgress({ completed: index + 1, total: files.length })
+      try {
+        const form = new FormData()
+        form.set('file', file)
+        form.set('alt', file.name)
+        const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
+        const responseBody = await response.json()
+        if (!response.ok) failures.push(`${file.name}: ${responseBody.error || 'Upload failed.'}`)
+        else uploadedCount += 1
+      } catch {
+        failures.push(`${file.name}: Upload failed.`)
+      }
+    }
+
+    setUploadProgress(null)
+    if (failures.length) {
+      setError(
+        `Uploaded ${uploadedCount} of ${files.length} files. ${failures.slice(0, 3).join(' ')}${failures.length > 3 ? ` And ${failures.length - 3} more failed.` : ''}`,
+      )
+    }
+    if (uploadedCount) {
       setLoading(true)
       await load()
     }
@@ -73,19 +96,28 @@ export function AssetLibrary() {
             <input
               ref={input}
               type="file"
+              multiple
               accept="image/*,video/*,audio/*,.pdf"
               className="hidden"
               onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) upload(file)
+                const files = Array.from(event.target.files ?? [])
+                if (files.length) void upload(files)
                 event.target.value = ''
               }}
             />
             <button
+              disabled={Boolean(uploadProgress)}
               onClick={() => input.current?.click()}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white"
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70"
             >
-              <Upload size={16} /> Upload asset
+              {uploadProgress ? (
+                <LoaderCircle size={16} className="animate-spin" />
+              ) : (
+                <Upload size={16} />
+              )}
+              {uploadProgress
+                ? `Uploading ${uploadProgress.completed}/${uploadProgress.total}`
+                : 'Upload assets'}
             </button>
           </div>
           {error && (
