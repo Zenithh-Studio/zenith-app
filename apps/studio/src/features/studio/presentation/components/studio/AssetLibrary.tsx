@@ -7,6 +7,22 @@ import { Brand, Sidebar } from './AppChrome'
 import type { AssetDocument } from '@znith/contracts'
 import { formatFileSize } from '@znith/utils'
 
+function mediaSource(asset: AssetDocument) {
+  const source = asset.url || ''
+  if (source) {
+    try {
+      const parsed = new URL(source, 'http://payload.local')
+      if (parsed.pathname.startsWith('/api/media/file/')) {
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`
+      }
+    } catch {
+      // Fall back to the saved filename if Payload returns a malformed URL.
+    }
+  }
+
+  return asset.filename ? `/api/media/file/${encodeURIComponent(asset.filename)}` : source
+}
+
 export function AssetLibrary() {
   const [assets, setAssets] = useState<AssetDocument[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,41 +99,44 @@ export function AssetLibrary() {
             </div>
           ) : assets.length ? (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-              {assets.map((asset) => (
-                <a
-                  key={asset.id}
-                  href={asset.url ?? undefined}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                  className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
-                >
-                  <div className="relative grid aspect-square place-items-center bg-zinc-100">
-                    {asset.mimeType?.startsWith('image/') && asset.url ? (
-                      <Image
-                        src={asset.url}
-                        alt={asset.filename || ''}
-                        fill
-                        sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 20vw"
-                        unoptimized
-                        className="object-cover"
-                      />
-                    ) : asset.mimeType?.startsWith('video/') && asset.url ? (
-                      <video src={asset.url} className="size-full object-cover" />
-                    ) : (
-                      <FileVideo className="text-zinc-300" />
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <p className="truncate text-xs font-medium">
-                      {asset.filename || 'Untitled asset'}
-                    </p>
-                    <p className="mt-1 text-[10px] text-zinc-400">
-                      {asset.mimeType} · {formatFileSize(asset.filesize)}
-                    </p>
-                  </div>
-                </a>
-              ))}
+              {assets.map((asset) => {
+                const source = mediaSource(asset)
+                return (
+                  <a
+                    key={asset.id}
+                    href={source || undefined}
+                    download
+                    target="_blank"
+                    rel="noreferrer"
+                    className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
+                  >
+                    <div className="relative grid aspect-square place-items-center bg-zinc-100">
+                      {asset.mimeType?.startsWith('image/') && source ? (
+                        <Image
+                          src={source}
+                          alt={asset.filename || ''}
+                          fill
+                          sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 20vw"
+                          unoptimized
+                          className="object-cover"
+                        />
+                      ) : asset.mimeType?.startsWith('video/') && source ? (
+                        <video src={source} className="size-full object-cover" />
+                      ) : (
+                        <FileVideo className="text-zinc-300" />
+                      )}
+                    </div>
+                    <div className="p-3">
+                      <p className="truncate text-xs font-medium">
+                        {asset.filename || 'Untitled asset'}
+                      </p>
+                      <p className="mt-1 text-[10px] text-zinc-400">
+                        {asset.mimeType} · {formatFileSize(asset.filesize)}
+                      </p>
+                    </div>
+                  </a>
+                )
+              })}
             </div>
           ) : (
             <div className="grid h-72 place-items-center rounded-2xl border border-dashed border-zinc-300 bg-white text-center">

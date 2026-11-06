@@ -19,7 +19,9 @@ export const Media: CollectionConfig = {
     createTagField({ relationTo: 'tags' }),
   ],
   upload: {
-    staticDir: path.resolve(process.cwd(), 'uploads'),
+    staticDir: process.env.PAYLOAD_UPLOAD_DIR?.trim()
+      ? path.resolve(process.env.PAYLOAD_UPLOAD_DIR.trim())
+      : path.resolve(process.cwd(), 'uploads'),
     mimeTypes: ['image/*', 'video/*', 'audio/*', 'application/pdf'],
   },
 }

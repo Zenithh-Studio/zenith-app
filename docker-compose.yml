@@ -59,6 +59,7 @@ services:
     environment:
       DATABASE_URL: ${APP_DATABASE_URL:-postgresql://${POSTGRES_USER:-znith}:${POSTGRES_PASSWORD:-znith-local-postgres}@database:5432/${POSTGRES_DB:-znith}}
       PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
+      PAYLOAD_UPLOAD_DIR: /app/apps/studio/uploads
       SITE_URL: ${SITE_URL:-http://localhost:3001}
       NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3001}
       APP_CHATGPT2API_BASE_URL: ${APP_CHATGPT2API_BASE_URL:-http://chatgpt2api/v1}
