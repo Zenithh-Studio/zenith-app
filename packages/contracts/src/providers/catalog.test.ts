@@ -51,3 +51,33 @@ describe('video model catalog', () => {
     expect(modelDurationOptions('runway', 'gen4.5')).toEqual([5, 10])
   })
 })
+
+describe('Gemini text model catalog', () => {
+  const textModels = providersFor('text').find((provider) => provider.id === 'gemini')?.models.text
+  const visionModels = providersFor('vision').find((provider) => provider.id === 'gemini')?.models
+    .vision
+
+  it('lists supported text-output Gemini models for Generate Text', () => {
+    expect(textModels).toEqual([
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+      'gemini-2.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-pro',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro-preview',
+      'gemini-4-argon',
+    ])
+  })
+
+  it('makes image-input Gemini models available to Analyze Image', () => {
+    expect(visionModels).toEqual(textModels?.filter((model) => model !== 'gemini-4-argon'))
+  })
+
+  it('uses readable labels for the Gemini model selector', () => {
+    expect(displayModelName('gemini-3.8-flash')).toBe('Gemini 3.8 Flash')
+    expect(displayModelName('gemini-4-argon')).toBe('Gemini 4 Argon')
+  })
+})
