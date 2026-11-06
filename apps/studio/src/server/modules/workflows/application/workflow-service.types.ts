@@ -1,4 +1,5 @@
 import type {
+  ExecutionLog,
   NodeExecutionRecord,
   NodeValue,
   WorkflowNode,
@@ -19,6 +20,7 @@ export interface WorkflowRunOptions {
     outputs: Record<string, NodeValue>,
   ) => Promise<WorkflowOutputPersistenceResult>
   onNodeRecord?: (record: NodeExecutionRecord) => Promise<void>
+  onExecutionLog?: (log: ExecutionLog) => Promise<void>
 }
 
 export interface WorkflowOutputPersister {

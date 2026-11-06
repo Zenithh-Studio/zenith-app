@@ -10,6 +10,7 @@ import { logServerEvent } from '../../../../lib/server-logger'
 import type {
   CreateWorkflowRequest,
   ExecutionDocument,
+  ExecutionLog,
   ExecuteWorkflowRequest,
   NodeExecutionRecord,
   WorkflowDefinition,
@@ -114,6 +115,8 @@ export class WorkflowService {
     let heartbeat: ReturnType<typeof setInterval> | undefined
     let heartbeatWrites: Promise<void> = Promise.resolve()
     let nodeRecordWrites: Promise<void> = Promise.resolve()
+    let executionLogWrites: Promise<void> = Promise.resolve()
+    const executionLogs: ExecutionLog[] = []
     const stopHeartbeat = () => {
       finishing = true
       if (heartbeat) clearInterval(heartbeat)
@@ -203,6 +206,16 @@ export class WorkflowService {
           .catch(() => undefined)
         await nodeRecordWrites
       }
+      const onExecutionLog = async (log: ExecutionLog) => {
+        executionLogs.push(cloneValue(log))
+        const logs = executionLogs.map((entry) => cloneValue(entry))
+        executionLogWrites = executionLogWrites
+          .then(async () => {
+            await this.repository.updateExecution(execution!.id, { logs })
+          })
+          .catch(() => undefined)
+        await executionLogWrites
+      }
 
       let runResult: EngineResult
       try {
@@ -214,6 +227,7 @@ export class WorkflowService {
               }
             : {}),
           onNodeRecord,
+          onExecutionLog,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Workflow execution failed.'
@@ -225,6 +239,7 @@ export class WorkflowService {
         }
       }
       await nodeRecordWrites
+      await executionLogWrites
       stopHeartbeat()
       await heartbeatWrites
 
@@ -256,7 +271,7 @@ export class WorkflowService {
       return { executionId: execution.id, ...runResult }
     } catch (error) {
       stopHeartbeat()
-      await Promise.all([heartbeatWrites, nodeRecordWrites])
+      await Promise.all([heartbeatWrites, nodeRecordWrites, executionLogWrites])
       if (claimed && startedAt) {
         const failedAt = this.now()
         const message = error instanceof Error ? error.message : 'Workflow execution failed.'

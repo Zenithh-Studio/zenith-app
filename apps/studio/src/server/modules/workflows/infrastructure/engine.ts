@@ -1101,23 +1101,49 @@ export async function runWorkflow(
   const records: NodeExecutionRecord[] = []
   const logs: EngineResult['logs'] = []
   const outputs = new Map<string, Record<string, NodeValue>>()
+  const emitLog = async (log: EngineResult['logs'][number]) => {
+    logs.push(log)
+    try {
+      await options.onExecutionLog?.(log)
+    } catch {
+      // A log persistence error should not stop the node from completing.
+    }
+  }
   try {
     const sorted = validateWorkflowDefinition(definition, targetNodeId)
     const included = new Set(sorted.map((node) => node.id))
     const pending = new Map(sorted.map((node) => [node.id, node]))
     const finished = new Map<string, NodeExecutionRecord>()
+    const recordIndexes = new Map<string, number>()
     const concurrency = clampNumber(options.concurrency ?? 4, 1, 16)
     const persistRecord = async (record: NodeExecutionRecord) => {
+      const recordIndex = recordIndexes.get(record.nodeId)
+      if (recordIndex === undefined) {
+        recordIndexes.set(record.nodeId, records.length)
+        records.push(record)
+      } else {
+        records[recordIndex] = record
+      }
       try {
         await options.onNodeRecord?.(record)
       } catch {
-        logs.push({
+        await emitLog({
           at: new Date().toISOString(),
           level: 'error',
           nodeId: record.nodeId,
           message: 'Could not persist execution progress for this node.',
         })
       }
+    }
+
+    for (const node of sorted) {
+      await persistRecord({ nodeId: node.id, status: 'queued' })
+      await emitLog({
+        at: new Date().toISOString(),
+        level: 'info',
+        nodeId: node.id,
+        message: `${node.name} queued`,
+      })
     }
 
     const executeOne = async (node: WorkflowNode) => {
@@ -1127,8 +1153,8 @@ export async function runWorkflow(
         status: 'running',
         startedAt: startedAt.toISOString(),
       }
-      records.push(record)
-      logs.push({
+      await persistRecord(record)
+      await emitLog({
         at: startedAt.toISOString(),
         level: 'info',
         nodeId: node.id,
@@ -1151,7 +1177,7 @@ export async function runWorkflow(
           const message = error instanceof Error ? error.message : 'Node execution failed.'
           if (attempt < retryCount) {
             const delay = Math.min(10_000, 400 * 2 ** attempt)
-            logs.push({
+            await emitLog({
               at: new Date().toISOString(),
               level: 'error',
               nodeId: node.id,
@@ -1170,6 +1196,12 @@ export async function runWorkflow(
         record.durationMs = Date.now() - startedAt.getTime()
         record.error = failureMessage || 'Node execution failed.'
         await persistRecord(record)
+        await emitLog({
+          at: record.completedAt,
+          level: 'error',
+          nodeId: node.id,
+          message: `${node.name} failed: ${record.error}`,
+        })
         return record
       }
 
@@ -1178,7 +1210,7 @@ export async function runWorkflow(
           const persistence = await options.persistNodeOutputs(node, result)
           result = persistence.outputs
           for (const warning of persistence.warnings ?? []) {
-            logs.push({
+            await emitLog({
               at: new Date().toISOString(),
               level: 'info',
               nodeId: node.id,
@@ -1186,7 +1218,7 @@ export async function runWorkflow(
             })
           }
         } catch {
-          logs.push({
+          await emitLog({
             at: new Date().toISOString(),
             level: 'info',
             nodeId: node.id,
@@ -1200,7 +1232,7 @@ export async function runWorkflow(
       record.status = 'succeeded'
       record.completedAt = new Date().toISOString()
       record.durationMs = Date.now() - startedAt.getTime()
-      logs.push({
+      await emitLog({
         at: record.completedAt,
         level: 'info',
         nodeId: node.id,
@@ -1234,8 +1266,13 @@ export async function runWorkflow(
                 status: 'skipped',
                 error: 'Skipped because an upstream dependency did not succeed.',
               }
-              records.push(record)
               await persistRecord(record)
+              await emitLog({
+                at: new Date().toISOString(),
+                level: 'info',
+                nodeId: node.id,
+                message: `${node.name} skipped because an upstream node did not succeed`,
+              })
               finished.set(node.id, record)
               return
             }
@@ -1249,13 +1286,18 @@ export async function runWorkflow(
     const failed = records.find((record) => record.status === 'failed')
     if (failed) {
       const message = failed.error || 'Workflow execution failed.'
-      logs.push({ at: new Date().toISOString(), level: 'error', message, nodeId: failed.nodeId })
+      await emitLog({
+        at: new Date().toISOString(),
+        level: 'error',
+        message,
+        nodeId: failed.nodeId,
+      })
       return { status: 'failed', records, logs, error: message }
     }
     return { status: 'succeeded', records, logs }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Workflow execution failed.'
-    logs.push({ at: new Date().toISOString(), level: 'error', message })
+    await emitLog({ at: new Date().toISOString(), level: 'error', message })
     return { status: 'failed', records, logs, error: message }
   }
 }

@@ -4,7 +4,7 @@ vi.mock('server-only', () => ({}))
 
 import { runWorkflow } from './engine'
 import { canConnect, providersFor, registryByType } from '@znith/contracts'
-import type { WorkflowDefinition } from '@znith/contracts'
+import type { ExecutionLog, NodeExecutionRecord, WorkflowDefinition } from '@znith/contracts'
 
 const executableDefinition: WorkflowDefinition = {
   version: 1,
@@ -172,6 +172,63 @@ describe('workflow engine', () => {
     const result = await runWorkflow(executableDefinition, 'template')
     expect(result.status).toBe('succeeded')
     expect(result.records.map((record) => record.nodeId)).toEqual(['input', 'template'])
+  })
+
+  it('persists queued and running node records before execution finishes', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'input',
+          type: 'input.text',
+          name: 'Input',
+          position: { x: 0, y: 0 },
+          config: { value: 'wait' },
+        },
+        {
+          id: 'delay',
+          type: 'utility.delay',
+          name: 'Wait',
+          position: { x: 200, y: 0 },
+          config: { milliseconds: 150 },
+        },
+      ],
+      edges: [
+        {
+          id: 'input-delay',
+          source: 'input',
+          sourceHandle: 'text',
+          target: 'delay',
+          targetHandle: 'input',
+        },
+      ],
+    }
+    const progress: NodeExecutionRecord[] = []
+    const logs: ExecutionLog[] = []
+    const run = runWorkflow(definition, undefined, {
+      onNodeRecord: async (record) => {
+        progress.push(structuredClone(record))
+      },
+      onExecutionLog: async (log) => {
+        logs.push(log)
+      },
+    })
+
+    await vi.waitFor(() =>
+      expect(progress.filter((record) => record.nodeId === 'delay').at(-1)?.status).toBe('running'),
+    )
+    expect(progress.filter((record) => record.nodeId === 'delay').at(-1)?.status).toBe('running')
+
+    const result = await run
+    expect(result.records.find((record) => record.nodeId === 'delay')?.status).toBe('succeeded')
+    expect(
+      progress.filter((record) => record.nodeId === 'delay').map((record) => record.status),
+    ).toEqual(['queued', 'running', 'succeeded'])
+    expect(logs.filter((log) => log.nodeId === 'delay').map((log) => log.message)).toEqual([
+      'Wait queued',
+      'Wait started',
+      'Wait completed',
+    ])
   })
 
   it('rejects cycles before executing nodes', async () => {

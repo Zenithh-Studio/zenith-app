@@ -71,6 +71,7 @@ import {
 import { paletteNodeRegistry, providersFor, registryByType } from '@znith/contracts'
 import type {
   ExecutionDocument,
+  ExecutionLog,
   NodeExecutionRecord,
   WorkflowDocument,
   WorkflowDefinition,
@@ -83,6 +84,7 @@ import { Brand } from './AppChrome'
 type StudioNodeData = {
   workflowNode: WorkflowNode
   record?: NodeExecutionRecord
+  executionLogs?: ExecutionLog[]
 }
 type StudioNode = Node<StudioNodeData, 'studioNode'>
 
@@ -262,6 +264,21 @@ function NodeRunIndicator({ status }: { status?: NodeExecutionRecord['status'] }
   return <GripVertical size={15} className="shrink-0 text-zinc-400" />
 }
 
+function NodeExecutionActivity({ logs }: { logs?: ExecutionLog[] }) {
+  const latestLog = logs?.at(-1)
+  if (!latestLog) return null
+
+  return (
+    <div
+      className={`mt-2 flex items-start gap-1.5 rounded-lg px-2.5 py-2 text-[10px] leading-relaxed ${latestLog.level === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-violet-50 text-violet-700'}`}
+      title={latestLog.message}
+    >
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-current" />
+      <span className="line-clamp-2">{latestLog.message}</span>
+    </div>
+  )
+}
+
 function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
   const textNodeEditor = useContext(TextNodeEditorContext)
   const definition = registryByType.get(data.workflowNode.type)
@@ -405,6 +422,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <span>@{slug}</span>
           <span>{mediaRatioLabel}</span>
         </div>
+        <NodeExecutionActivity logs={data.executionLogs} />
       </div>
     )
   }
@@ -466,6 +484,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
         <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-500">
           <span>@{slug}</span>
         </div>
+        <NodeExecutionActivity logs={data.executionLogs} />
       </div>
     )
   }
@@ -529,6 +548,7 @@ function StudioNodeCard({ data, selected }: NodeProps<StudioNode>) {
           <div className="text-xs leading-relaxed text-zinc-400">{definition?.description}</div>
         )}
       </div>
+      <NodeExecutionActivity logs={data.executionLogs} />
       <div className="flex items-center justify-between border-t border-zinc-100 px-3.5 py-2 text-[10px] text-zinc-400">
         <span>
           {definition?.inputs.length ?? 0} in · {definition?.outputs.length ?? 0} out
@@ -544,12 +564,17 @@ const nodeTypes = { studioNode: StudioNodeCard }
 function toFlowNodes(
   definition: WorkflowDefinition,
   records: NodeExecutionRecord[] = [],
+  logs: ExecutionLog[] = [],
 ): StudioNode[] {
   return definition.nodes.map((node) => ({
     id: node.id,
     type: 'studioNode',
     position: node.position,
-    data: { workflowNode: node, record: records.find((record) => record.nodeId === node.id) },
+    data: {
+      workflowNode: node,
+      record: records.find((record) => record.nodeId === node.id),
+      executionLogs: logs.filter((log) => log.nodeId === node.id),
+    },
   }))
 }
 
@@ -591,6 +616,13 @@ function runScopeNodeIds(definition: WorkflowDefinition, targetNodeId?: string) 
     }
   }
   return included
+}
+
+function executionScopeNodeIds(execution: ExecutionDocument) {
+  if (execution.scope === 'workflow')
+    return new Set(execution.snapshot.nodes.map((node) => node.id))
+  const nodeRun = /^node:(.*):with-dependencies$/.exec(execution.scope)
+  return runScopeNodeIds(execution.snapshot, nodeRun?.[1])
 }
 
 function hasGeneratedMediaOutput(node: StudioNode) {
@@ -676,6 +708,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const uploadTarget = useRef<'new' | 'selected'>('new')
   const runLockRef = useRef(false)
   const runStartedAtRef = useRef<string | null>(null)
+  const runExecutionIdRef = useRef<string | null>(null)
   const [undoStack, setUndoStack] = useState<WorkflowDefinition[]>([])
   const [redoStack, setRedoStack] = useState<WorkflowDefinition[]>([])
   const textEditHistoryCaptured = useRef(new Set<string>())
@@ -686,14 +719,33 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const response = await fetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
     const responseBody = await response.json()
     if (!response.ok) return setError(responseBody.error || 'Could not load workflow.')
+    const refreshedExecutions = responseBody.executions as ExecutionDocument[]
+    const activeExecution = refreshedExecutions.find((execution) => execution.status === 'running')
+    const latestExecution = activeExecution ?? refreshedExecutions[0]
     setWorkflow(responseBody.workflow)
-    setExecutions(responseBody.executions)
+    setExecutions(refreshedExecutions)
     setNodes(
       toFlowNodes(
         responseBody.workflow.definition,
-        mergeExecutionNodeRecords(responseBody.executions),
+        mergeExecutionNodeRecords(refreshedExecutions),
+        latestExecution?.logs,
       ),
     )
+    if (activeExecution) {
+      runLockRef.current = true
+      runStartedAtRef.current = activeExecution.startedAt
+      runExecutionIdRef.current = activeExecution.id
+      setRunStartedAt(activeExecution.startedAt)
+      setRunScopeIds([...executionScopeNodeIds(activeExecution)])
+      setRunning(true)
+    } else {
+      runLockRef.current = false
+      runStartedAtRef.current = null
+      runExecutionIdRef.current = null
+      setRunStartedAt(null)
+      setRunScopeIds([])
+      setRunning(false)
+    }
     setEdges(toFlowEdges(responseBody.workflow.definition))
     setUndoStack([])
     setRedoStack([])
@@ -729,31 +781,49 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         }
 
         const refreshedExecutions = responseBody.executions as ExecutionDocument[]
-        const currentExecution = refreshedExecutions.find(
-          (execution) => execution.startedAt >= runStartedAt,
-        )
+        const currentExecution =
+          refreshedExecutions.find((execution) => execution.id === runExecutionIdRef.current) ??
+          refreshedExecutions.find((execution) => execution.startedAt >= runStartedAt)
         if (!currentExecution) return
 
+        runExecutionIdRef.current = currentExecution.id
         setExecutions(refreshedExecutions)
+        setRunScopeIds([...executionScopeNodeIds(currentExecution)])
         const recordsById = new Map(
-          currentExecution.nodeRecords.map((record) => [record.nodeId, record]),
+          mergeExecutionNodeRecords(refreshedExecutions).map((record) => [record.nodeId, record]),
         )
+        const logsByNodeId = new Map<string, ExecutionLog[]>()
+        for (const log of currentExecution.logs ?? []) {
+          if (!log.nodeId) continue
+          logsByNodeId.set(log.nodeId, [...(logsByNodeId.get(log.nodeId) ?? []), log])
+        }
         setNodes((current) =>
           current.map((node) => {
             const record = recordsById.get(node.id)
-            if (!record) return node
             return {
               ...node,
               data: {
                 ...node.data,
-                record: {
-                  ...record,
-                  outputs: record.outputs ?? node.data.record?.outputs,
-                },
+                ...(record
+                  ? {
+                      record: {
+                        ...record,
+                        outputs: record.outputs ?? node.data.record?.outputs,
+                      },
+                    }
+                  : {}),
+                executionLogs: logsByNodeId.get(node.id) ?? [],
               },
             }
           }),
         )
+        if (currentExecution.status !== 'running') {
+          runStartedAtRef.current = null
+          runExecutionIdRef.current = null
+          runLockRef.current = false
+          setRunStartedAt(null)
+          setRunning(false)
+        }
       } catch {
         // A temporary progress refresh failure should not interrupt the running execution.
       } finally {
@@ -842,6 +912,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const executeRun = async (targetNodeId?: string) => {
     if (runLockRef.current) return
     runLockRef.current = true
+    runExecutionIdRef.current = null
+    let executionCompleted = false
     setRunning(true)
     setError('')
     try {
@@ -876,6 +948,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           body: JSON.stringify({ targetNodeId }),
         })
         const responseBody = await response.json()
+        if (typeof responseBody.executionId === 'string') {
+          runExecutionIdRef.current = responseBody.executionId
+        }
+        executionCompleted = typeof responseBody.executionId === 'string'
         const records: NodeExecutionRecord[] = responseBody.records ?? []
         setNodes((current) =>
           current.map((node) => {
@@ -907,10 +983,15 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     } catch {
       setError('Could not start workflow execution.')
     } finally {
-      runStartedAtRef.current = null
-      setRunStartedAt(null)
-      setRunning(false)
-      runLockRef.current = false
+      if (runExecutionIdRef.current && !executionCompleted) {
+        setRunning(true)
+      } else {
+        runStartedAtRef.current = null
+        runExecutionIdRef.current = null
+        setRunStartedAt(null)
+        setRunning(false)
+        runLockRef.current = false
+      }
     }
   }
 
@@ -933,6 +1014,9 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     ? registryByType.get(selectedNode.data.workflowNode.type)
     : undefined
   const latestExecution = executions[0]
+  const latestExecutionNodeNames = new Map(
+    (latestExecution?.snapshot.nodes ?? []).map((node) => [node.id, node.name]),
+  )
   const runScope = new Set(runScopeIds)
   const runNodes = nodes.filter((node) => runScope.has(node.id))
   const runningNodeNames = runNodes
@@ -1861,6 +1945,30 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                     <p className="text-xs text-zinc-400">Run this node to inspect its output.</p>
                   )}
                 </InspectorSection>
+                <InspectorSection title="Node log">
+                  {selectedNode.data.executionLogs?.length ? (
+                    <div className="space-y-2">
+                      {selectedNode.data.executionLogs.map((log, index) => (
+                        <div
+                          key={`${log.at}-${index}`}
+                          className="rounded-xl bg-zinc-50 p-3 text-[11px] leading-relaxed"
+                        >
+                          <div className="mb-1 flex items-center gap-1.5 text-[10px] text-zinc-400">
+                            <span
+                              className={`size-1.5 rounded-full ${log.level === 'error' ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                            />
+                            {new Date(log.at).toLocaleTimeString()}
+                          </div>
+                          <p className={log.level === 'error' ? 'text-rose-700' : 'text-zinc-600'}>
+                            {log.message}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-400">This node has no log entries yet.</p>
+                  )}
+                </InspectorSection>
                 <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 p-4">
                   <button
                     onClick={() => run(selectedId || undefined)}
@@ -1904,11 +2012,21 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                       </div>
                       <div className="mt-4 space-y-2 border-t border-zinc-100 pt-3">
                         {latestExecution.logs?.map((log, index) => (
-                          <div key={index} className="flex gap-2 text-[11px] leading-relaxed">
+                          <div
+                            key={`${log.at}-${index}`}
+                            className="flex gap-2 text-[11px] leading-relaxed"
+                          >
                             <span
                               className={`mt-1.5 size-1.5 shrink-0 rounded-full ${log.level === 'error' ? 'bg-rose-500' : 'bg-emerald-500'}`}
                             />
-                            <span className="text-zinc-600">{log.message}</span>
+                            <span className="text-zinc-600">
+                              {log.nodeId ? (
+                                <span className="mr-1 font-semibold text-violet-700">
+                                  {latestExecutionNodeNames.get(log.nodeId) || log.nodeId}:
+                                </span>
+                              ) : null}
+                              {log.message}
+                            </span>
                           </div>
                         ))}
                       </div>

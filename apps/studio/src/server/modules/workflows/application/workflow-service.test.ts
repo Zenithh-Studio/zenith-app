@@ -312,6 +312,58 @@ describe('WorkflowService', () => {
     )
   })
 
+  it('persists node logs while the execution is still running', async () => {
+    const startedRecord: NodeExecutionRecord = {
+      nodeId: 'prompt',
+      status: 'running',
+      startedAt: '2026-11-05T00:00:00.050Z',
+    }
+    const log = {
+      at: '2026-11-05T00:00:00.050Z',
+      level: 'info' as const,
+      nodeId: 'prompt',
+      message: 'Prompt started',
+    }
+    let finishRun: (() => void) | undefined
+    const runWorkflow: WorkflowRunner = async (_definition, _targetNodeId, options) => {
+      await options?.onNodeRecord?.(startedRecord)
+      await options?.onExecutionLog?.(log)
+      await new Promise<void>((resolve) => {
+        finishRun = resolve
+      })
+      return { status: 'succeeded', records: [startedRecord], logs: [log] }
+    }
+    const repository = new MemoryWorkflowRepository(
+      createWorkflowDocument({
+        version: 1,
+        nodes: [
+          {
+            id: 'prompt',
+            type: 'input.prompt',
+            name: 'Prompt',
+            position: { x: 0, y: 0 },
+            config: { value: 'Hello' },
+          },
+        ],
+        edges: [],
+      }),
+    )
+    const service = new WorkflowService(repository, runWorkflow)
+    const executionPromise = service.execute('workflow-string-id', {})
+
+    await vi.waitFor(() => {
+      const execution = [...repository.executions.values()][0]
+      expect(execution?.logs).toEqual([log])
+      expect(execution?.status).toBe('running')
+    })
+    const { executions } = await service.getWorkflow('workflow-string-id')
+    expect(executions[0].nodeRecords).toEqual([startedRecord])
+    expect(executions[0].logs).toEqual([log])
+
+    finishRun?.()
+    await expect(executionPromise).resolves.toMatchObject({ status: 'succeeded' })
+  })
+
   it('does not run a missing workflow', async () => {
     const runWorkflow = vi.fn(async () => successfulRun)
     const service = new WorkflowService(new MemoryWorkflowRepository(), runWorkflow)
