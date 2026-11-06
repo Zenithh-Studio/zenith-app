@@ -105,7 +105,6 @@ export function AssetLibrary() {
                   <a
                     key={asset.id}
                     href={source || undefined}
-                    download
                     target="_blank"
                     rel="noreferrer"
                     className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
