@@ -98,6 +98,8 @@ export const workflowTemplates: Record<
           prompt: '',
           aspectRatio: '16:9',
           duration: 5,
+          resolution: '720p',
+          generateAudio: true,
         }),
       ],
       edges: [edge('brief', 'prompt', 'video', 'prompt')],

@@ -13,6 +13,7 @@ import type {
   WorkflowRunResult,
 } from '@znith/contracts'
 import type { WorkflowRunOptions } from '../application/workflow-service.types'
+import { generateVideoWithProvider } from './video-provider-adapters'
 
 export { workflowDefinitionSchema } from '@znith/contracts'
 
@@ -1028,6 +1029,8 @@ async function executeNode(
           videos: inputs.video?.map((item) => absoluteMediaURL(item.value)),
           aspectRatio: node.config.aspectRatio,
           duration: Number(node.config.duration) || 5,
+          resolution: node.config.resolution,
+          generateAudio: node.config.generateAudio,
         })
         const url = mediaURL(result.url || result.output || result.data)
         if (!url) throw new Error('Custom provider completed without a media URL.')
@@ -1062,6 +1065,56 @@ async function executeNode(
             },
           },
         }
+      }
+      const model = text(node.config.model)
+      if (
+        (provider === 'replicate' && model === 'bytedance/seedance-2.5') ||
+        (provider === 'gemini' &&
+          ['gemini-omni-1.1-flash', 'veo-3.1-fast-generate-preview'].includes(model)) ||
+        (provider === 'runway' && model === 'gen4.5')
+      ) {
+        if (
+          inputs.video?.length &&
+          (provider !== 'replicate' || model !== 'bytedance/seedance-2.5')
+        ) {
+          throw new Error(`${provider} ${model} does not support reference videos in this node.`)
+        }
+        if (
+          inputs.image &&
+          inputs.image.length > 1 &&
+          !['gemini-omni-1.1-flash', 'bytedance/seedance-2.5'].includes(model)
+        ) {
+          throw new Error(`${model} accepts one reference image per video request.`)
+        }
+        const generated = await generateVideoWithProvider({
+          provider,
+          model,
+          prompt,
+          aspectRatio: text(node.config.aspectRatio || '16:9'),
+          duration: Number(node.config.duration) || 5,
+          resolution: text(node.config.resolution || '720p'),
+          generateAudio: node.config.generateAudio !== false,
+          image: inputs.image?.length ? inputs.image[0].value : undefined,
+          video: inputs.video?.length ? inputs.video[0].value : undefined,
+          timeoutMs: Number(node.config.timeoutMs) || 300_000,
+        })
+        return {
+          video: {
+            type: 'video',
+            value: { url: generated.url },
+            metadata: {
+              provider,
+              model: generated.model,
+              providerJobId: generated.providerJobId,
+              referenceAssetId: inputs.image?.[0]?.assetId,
+            },
+          },
+        }
+      }
+      if (provider !== 'replicate') {
+        throw new Error(
+          `Video model “${provider} · ${model || 'Default model'}” is not configured.`,
+        )
       }
       const generated = await runReplicate(text(node.config.model), {
         prompt,

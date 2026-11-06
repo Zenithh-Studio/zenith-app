@@ -2,6 +2,7 @@ export type ProviderId =
   | 'openai'
   | 'chatgpt2api'
   | 'muse2api'
+  | 'runway'
   | 'anthropic'
   | 'gemini'
   | 'replicate'
@@ -57,10 +58,11 @@ export const providerCatalog: ProviderInfo[] = [
   {
     id: 'gemini',
     name: 'Google Gemini',
-    modalities: ['text', 'vision'],
+    modalities: ['text', 'vision', 'video'],
     models: {
       text: ['gemini-2.0-flash', 'gemini-2.5-flash'],
       vision: ['gemini-2.0-flash', 'gemini-2.5-flash'],
+      video: ['gemini-omni-1.1-flash', 'veo-3.1-fast-generate-preview'],
     },
     credential: 'APP_GEMINI_API_KEY',
   },
@@ -68,8 +70,15 @@ export const providerCatalog: ProviderInfo[] = [
     id: 'replicate',
     name: 'Replicate',
     modalities: ['image', 'video'],
-    models: { image: [], video: [] },
+    models: { image: [], video: ['bytedance/seedance-2.5'] },
     credential: 'REPLICATE_API_TOKEN',
+  },
+  {
+    id: 'runway',
+    name: 'Runway',
+    modalities: ['video'],
+    models: { video: ['gen4.5'] },
+    credential: 'RUNWAYML_API_SECRET',
   },
   {
     id: 'comfyui',
@@ -87,4 +96,59 @@ export const providerCatalog: ProviderInfo[] = [
 
 export function providersFor(modality: ProviderModality) {
   return providerCatalog.filter((provider) => provider.modalities.includes(modality))
+}
+
+const modelDisplayNames: Record<string, string> = {
+  'muse-video': 'Muse Video',
+  'bytedance/seedance-2.5': 'Seedance 2.5',
+  'gemini-omni-1.1-flash': 'Gemini Omni Flash',
+  'veo-3.1-fast-generate-preview': 'Veo 3.1 Fast',
+  'gen4.5': 'Gen-4.5',
+}
+
+export function displayModelName(model: string) {
+  return modelDisplayNames[model] ?? model
+}
+
+export function providerModelLabel(providerId: string, model: string) {
+  const provider = providerCatalog.find((item) => item.id === providerId)
+  return `${provider?.name ?? providerId} · ${displayModelName(model)}`
+}
+
+export function modelSupportsResolution(providerId: string, model: string) {
+  return modelResolutionOptions(providerId, model).length > 0
+}
+
+export function modelResolutionOptions(providerId: string, model: string) {
+  if (providerId === 'replicate' && model === 'bytedance/seedance-2.5') {
+    return ['480p', '720p', '1080p']
+  }
+  if (providerId === 'gemini' && model === 'gemini-omni-1.1-flash') {
+    return ['720p', '1080p']
+  }
+  if (providerId === 'gemini' && model === 'veo-3.1-fast-generate-preview') {
+    return ['720p', '1080p']
+  }
+  return []
+}
+
+export function modelDurationOptions(providerId: string, model: string) {
+  if (providerId === 'replicate' && model === 'bytedance/seedance-2.5') {
+    return [4, 5, 6, 8, 10, 15, 20, 25, 30]
+  }
+  if (providerId === 'gemini' && model === 'veo-3.1-fast-generate-preview') {
+    return [4, 6, 8]
+  }
+  if (providerId === 'runway' && model === 'gen4.5') {
+    return [5, 10]
+  }
+  return [3, 4, 5, 6, 8, 10]
+}
+
+export function defaultModelDuration(providerId: string, model: string) {
+  return providerId === 'gemini' && model === 'veo-3.1-fast-generate-preview' ? 8 : 5
+}
+
+export function modelSupportsAudioToggle(providerId: string, model: string) {
+  return providerId === 'replicate' && model === 'bytedance/seedance-2.5'
 }

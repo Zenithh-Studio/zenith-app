@@ -26,6 +26,8 @@ describe('workflow node palette', () => {
       expect(registryByType.get(type)?.defaultConfig).toMatchObject({
         provider: 'muse2api',
         model: 'muse-video',
+        resolution: '720p',
+        generateAudio: true,
       })
     }
   })
@@ -34,7 +36,12 @@ describe('workflow node palette', () => {
     const definition = workflowTemplates.video.definition
     const videoNode = definition.nodes.find((node) => node.type === 'ai.generate-video')
 
-    expect(videoNode?.config).toMatchObject({ provider: 'muse2api', model: 'muse-video' })
+    expect(videoNode?.config).toMatchObject({
+      provider: 'muse2api',
+      model: 'muse-video',
+      resolution: '720p',
+      generateAudio: true,
+    })
     expect(definition.edges).toEqual([
       {
         id: 'brief-video',
