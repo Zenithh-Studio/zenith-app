@@ -6,6 +6,12 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ### [Added]
 
+- Public app accounts, owner-scoped workflows, assets, prompts, settings, and Studio history, with encrypted write-only provider credentials and admin-managed storage quotas.
+- Image Studio, Video Studio, Prompt Library, per-user settings, typed asset search, and persistent generation history.
+- Recoverable video task polling, retry provenance, workflow group containers and scoped DAG execution, plus audio input, generation, and save nodes.
+- Workflow node actions for inline rename, redacted diagnostics, execution JSON, output history, retry, task status, and saving generated media to Assets.
+- Local crop, split, and Lanczos upscale tools, with provider-backed image description, edit, variation, angle, and super-resolution adapters.
+- Responsive mobile navigation, a workflow side panel and bottom dock, keyboard help, and English/Vietnamese locale preferences.
 - ChatGPT2API now pulls its English-language image from the separate GHCR repository, keeping its source outside Zenith.
 - Muse2API can generate videos through a server-configured asynchronous gateway.
 - Docker Compose builds and runs Muse2API with a persistent browser-account store and a private shared API key.
@@ -16,6 +22,8 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ### [Fixed]
 
+- Mobile page shells now stack navigation above page content instead of reserving a desktop sidebar column.
+- The Docs route uses the shared navigation and is reachable from the workspace sidebar.
 - Payload uploads persist in the Docker volume across app restarts and resolve previews through the local media route.
 - The selected image provider remains selected when its default model changes.
 
