@@ -127,7 +127,7 @@ async function signUp(request: Request) {
 
 function signupAccepted() {
   return Response.json(
-    { message: 'If the email is available, your account is ready. Sign in to continue.' },
+    { message: 'Signup request received. Try signing in if the email can be registered.' },
     { status: 200 },
   )
 }

@@ -396,8 +396,8 @@ const additionalVietnamese: Record<string, string> = {
   'Please try again.': 'Vui lòng thử lại.',
   'The email or password was not accepted.': 'Email hoặc mật khẩu không hợp lệ.',
   'Account creation is temporarily unavailable.': 'Tạm thời chưa thể tạo tài khoản.',
-  'If the email was available, your account is ready. Sign in to continue.':
-    'Nếu email có thể đăng ký, tài khoản đã sẵn sàng. Hãy đăng nhập để tiếp tục.',
+  'We could not sign you in automatically. If you already have an account, use its existing password. Otherwise, retry signup.':
+    'Không thể đăng nhập tự động. Nếu bạn đã có tài khoản, hãy dùng mật khẩu hiện tại. Nếu chưa, hãy thử đăng ký lại.',
   'Back to workflows': 'Quay lại quy trình',
   'Workflow guide': 'Hướng dẫn quy trình',
   'Build typed production graphs, configure providers later, and inspect every persisted execution.':

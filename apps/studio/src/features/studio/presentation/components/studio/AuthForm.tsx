@@ -55,12 +55,21 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         const body = (await response.json()) as { message?: string; error?: string }
         if (!response.ok)
           throw new Error(body.error || 'Account creation is temporarily unavailable.')
-        setMessage(
-          t(
-            body.message ||
-              'If the email was available, your account is ready. Sign in to continue.',
-          ),
-        )
+        const loginResponse = await fetch('/api/users/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        })
+        if (!loginResponse.ok) {
+          setMessage(
+            t(
+              'We could not sign you in automatically. If you already have an account, use its existing password. Otherwise, retry signup.',
+            ),
+          )
+          return
+        }
+        router.replace('/workflows')
+        router.refresh()
       } else {
         const response = await fetch('/api/users/login', {
           method: 'POST',

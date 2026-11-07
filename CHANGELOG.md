@@ -22,6 +22,7 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ### [Fixed]
 
+- Signup now starts a session after account creation and explains how to continue if automatic sign-in fails.
 - Mobile page shells now stack navigation above page content instead of reserving a desktop sidebar column.
 - The Docs route uses the shared navigation and is reachable from the workspace sidebar.
 - Payload uploads persist in the Docker volume across app restarts and resolve previews through the local media route.
