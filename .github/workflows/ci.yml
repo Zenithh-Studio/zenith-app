@@ -31,5 +31,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check project version synchronization
+        run: pnpm version:check
+
       - name: Verify formatting, TypeScript, and unit tests
         run: pnpm verify
