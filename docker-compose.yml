@@ -94,6 +94,7 @@ services:
     environment:
       DATABASE_URL: ${APP_DATABASE_URL:-postgresql://${POSTGRES_USER:-znith}:${POSTGRES_PASSWORD:-znith-local-postgres}@database:5432/${POSTGRES_DB:-znith}}
       PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
+      APP_ADMIN_SETUP_TOKEN: ${APP_ADMIN_SETUP_TOKEN:-}
       PAYLOAD_UPLOAD_DIR: /app/apps/studio/uploads
       SITE_URL: ${SITE_URL:-http://localhost:3001}
       NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3001}
@@ -116,7 +117,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3000/api/studio/workflows').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/login').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 15s
       timeout: 5s

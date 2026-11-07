@@ -1,4 +1,13 @@
 import type { CollectionConfig } from 'payload'
+import {
+  canWriteWorkflowRuntime,
+  isAppAdmin,
+  isAppUser,
+  isPayloadAdmin,
+  ownerAccess,
+  setDocumentOwner,
+  workflowRuntimeAccess,
+} from './access'
 
 export const Workflows: CollectionConfig = {
   slug: 'workflows',
@@ -8,12 +17,18 @@ export const Workflows: CollectionConfig = {
     defaultColumns: ['name', 'category', 'status', 'updatedAt'],
   },
   access: {
-    create: () => true,
-    delete: () => true,
-    read: () => true,
-    update: () => true,
+    create: ({ req }) =>
+      (isAppUser(req.user) || isAppAdmin(req.user) || isPayloadAdmin(req.user)) &&
+      canWriteWorkflowRuntime(req),
+    delete: workflowRuntimeAccess,
+    read: ownerAccess,
+    update: workflowRuntimeAccess,
+  },
+  hooks: {
+    beforeChange: [({ data, req }) => setDocumentOwner({ data, req })],
   },
   fields: [
+    { name: 'owner', type: 'relationship', relationTo: 'users', index: true },
     { name: 'name', type: 'text', required: true, maxLength: 120 },
     { name: 'description', type: 'textarea', defaultValue: '' },
     {
@@ -35,8 +50,19 @@ export const Workflows: CollectionConfig = {
       required: true,
       defaultValue: 'idle',
       options: ['idle', 'queued', 'running', 'succeeded', 'failed', 'cancelled'],
+      access: {
+        create: ({ req }) => canWriteWorkflowRuntime(req),
+        update: ({ req }) => canWriteWorkflowRuntime(req),
+      },
     },
-    { name: 'lastExecutionAt', type: 'date' },
+    {
+      name: 'lastExecutionAt',
+      type: 'date',
+      access: {
+        create: ({ req }) => canWriteWorkflowRuntime(req),
+        update: ({ req }) => canWriteWorkflowRuntime(req),
+      },
+    },
     {
       name: 'definition',
       type: 'json',

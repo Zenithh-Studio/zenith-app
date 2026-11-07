@@ -1,7 +1,9 @@
 import type { CollectionConfig } from 'payload'
+import { adminOnly } from './access'
 
 export const Tags: CollectionConfig = {
   slug: 'tags',
+  access: { create: adminOnly, delete: adminOnly, read: adminOnly, update: adminOnly },
   admin: {
     useAsTitle: 'name',
   },
