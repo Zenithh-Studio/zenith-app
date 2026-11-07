@@ -5,6 +5,7 @@ import type { WorkflowDefinition, WorkflowNode } from './types'
 export function validateWorkflowDefinition(
   definition: WorkflowDefinition,
   targetNodeId?: string,
+  targetNodeIds?: string[],
 ): WorkflowNode[] {
   const parsed = workflowDefinitionSchema.safeParse(definition)
   if (!parsed.success) {
@@ -13,9 +14,17 @@ export function validateWorkflowDefinition(
 
   const nodes = new Map(parsed.data.nodes.map((node) => [node.id, node]))
   let included = new Set(nodes.keys())
-  if (targetNodeId) {
+  if (targetNodeIds) {
+    if (!targetNodeIds.length) throw new Error('The selected group has no workflow nodes.')
+    for (const targetId of targetNodeIds) {
+      if (!nodes.has(targetId)) throw new Error('The selected group references a missing node.')
+    }
+    included = new Set(targetNodeIds)
+  } else if (targetNodeId) {
     if (!nodes.has(targetNodeId)) throw new Error('The selected node no longer exists.')
     included = new Set([targetNodeId])
+  }
+  if (targetNodeId || targetNodeIds) {
     let changed = true
     while (changed) {
       changed = false

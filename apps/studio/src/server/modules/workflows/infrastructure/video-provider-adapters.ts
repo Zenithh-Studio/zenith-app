@@ -3,6 +3,7 @@ import 'server-only'
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
 import { clampNumber } from '@znith/utils'
+import { resolveProviderEndpoint, resolveProviderKey } from '../../providers/credential-context'
 
 export interface VideoGenerationInput {
   provider: string
@@ -15,12 +16,23 @@ export interface VideoGenerationInput {
   image?: unknown
   video?: unknown
   timeoutMs: number
+  onTaskCreated?: (task: {
+    provider: string
+    model: string
+    taskId: string
+  }) => Promise<void> | void
 }
 
 export interface VideoGenerationResult {
   url: string
   providerJobId?: string
   model: string
+}
+
+export interface VideoTaskCheck {
+  status: 'pending' | 'succeeded' | 'failed' | 'cancelled'
+  url?: string
+  error?: string
 }
 
 const text = (value: unknown) => String(value ?? '')
@@ -34,13 +46,7 @@ function mediaUrl(value: unknown) {
 }
 
 function requireKey(name: 'APP_GEMINI_API_KEY' | 'REPLICATE_API_TOKEN' | 'RUNWAYML_API_SECRET') {
-  const value = process.env[name]
-  if (!value) {
-    throw new Error(
-      `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Set the ${name} server environment variable.`,
-    )
-  }
-  return value
+  return resolveProviderKey(name)
 }
 
 function deadlineFor(timeoutMs: number) {
@@ -221,12 +227,20 @@ async function runSeedance(input: VideoGenerationInput): Promise<VideoGeneration
   }
 
   const deadline = deadlineFor(input.timeoutMs)
-  let response = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}/predictions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ input: payload }),
-    signal: requestTimeout(deadline),
-  })
+  const replicateBase = 'https://api.replicate.com/v1/'
+  let response = await fetch(
+    await resolveProviderEndpoint(
+      'replicate',
+      `models/${owner}/${name}/predictions`,
+      replicateBase,
+    ),
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: payload }),
+      signal: requestTimeout(deadline),
+    },
+  )
   let prediction = await readJSON<{
     id?: string
     status?: string
@@ -235,11 +249,12 @@ async function runSeedance(input: VideoGenerationInput): Promise<VideoGeneration
     urls?: { get?: string }
   }>(response, 'Replicate')
   if (!prediction.id) throw new Error('Replicate did not return a prediction ID.')
+  await input.onTaskCreated?.({ provider: 'replicate', model, taskId: prediction.id })
 
   while (!['succeeded', 'failed', 'canceled'].includes(prediction.status || '')) {
     await new Promise((resolve) => setTimeout(resolve, Math.min(1_500, deadline - Date.now())))
     response = await fetch(
-      prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`,
+      await resolveProviderEndpoint('replicate', `predictions/${prediction.id}`, replicateBase),
       { headers: { Authorization: `Bearer ${token}` }, signal: requestTimeout(deadline) },
     )
     prediction = await readJSON(response, 'Replicate')
@@ -263,22 +278,29 @@ async function runGeminiOmni(input: VideoGenerationInput): Promise<VideoGenerati
   }
   parts.push({ type: 'text', text: input.prompt })
 
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
-    method: 'POST',
-    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: input.model,
-      input: parts,
-      response_format: {
-        type: 'video',
-        aspect_ratio: input.aspectRatio,
-        resolution: input.resolution,
-        duration: `${Math.floor(input.duration || 5)}s`,
-        delivery: 'uri',
-      },
-    }),
-    signal: requestTimeout(deadline),
-  })
+  const response = await fetch(
+    await resolveProviderEndpoint(
+      'gemini',
+      'interactions',
+      'https://generativelanguage.googleapis.com/v1beta/',
+    ),
+    {
+      method: 'POST',
+      headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: input.model,
+        input: parts,
+        response_format: {
+          type: 'video',
+          aspect_ratio: input.aspectRatio,
+          resolution: input.resolution,
+          duration: `${Math.floor(input.duration || 5)}s`,
+          delivery: 'uri',
+        },
+      }),
+      signal: requestTimeout(deadline),
+    },
+  )
   const interaction = await readJSON<{
     id?: string
     status?: string
@@ -287,6 +309,9 @@ async function runGeminiOmni(input: VideoGenerationInput): Promise<VideoGenerati
       content?: Array<{ type?: string; data?: string; uri?: string }>
     }>
   }>(response, 'Gemini Omni Flash')
+  if (interaction.id) {
+    await input.onTaskCreated?.({ provider: 'gemini', model: input.model, taskId: interaction.id })
+  }
   const video = interaction.steps
     ?.filter((step) => step.type === 'model_output')
     .flatMap((step) => step.content || [])
@@ -324,7 +349,11 @@ async function runVeo(input: VideoGenerationInput): Promise<VideoGenerationResul
       : closest,
   )
   const createResponse = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:predictLongRunning`,
+    await resolveProviderEndpoint(
+      'gemini',
+      `models/${encodeURIComponent(input.model)}:predictLongRunning`,
+      'https://generativelanguage.googleapis.com/v1beta/',
+    ),
     {
       method: 'POST',
       headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
@@ -349,11 +378,17 @@ async function runVeo(input: VideoGenerationInput): Promise<VideoGenerationResul
     }
   }>(createResponse, 'Veo 3.1 Fast')
   if (!operation.name) throw new Error('Veo did not return an operation ID.')
+  const operationName = operation.name
+  await input.onTaskCreated?.({ provider: 'gemini', model: input.model, taskId: operationName })
 
   while (!operation.done) {
     await new Promise((resolve) => setTimeout(resolve, Math.min(5_000, deadline - Date.now())))
     const pollResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${operation.name}`,
+      await resolveProviderEndpoint(
+        'gemini',
+        operationName.replace(/^\/+/, ''),
+        'https://generativelanguage.googleapis.com/v1beta/',
+      ),
       { headers: { 'x-goog-api-key': apiKey }, signal: requestTimeout(deadline) },
     )
     operation = await readJSON(pollResponse, 'Veo 3.1 Fast')
@@ -363,7 +398,7 @@ async function runVeo(input: VideoGenerationInput): Promise<VideoGenerationResul
   if (!uri) throw new Error('Veo completed without a video URL.')
   return {
     url: await downloadGoogleVideo(uri, apiKey, deadline),
-    providerJobId: operation.name,
+    providerJobId: operationName,
     model: input.model,
   }
 }
@@ -391,7 +426,8 @@ async function runRunway(input: VideoGenerationInput): Promise<VideoGenerationRe
     duration: input.duration >= 8 ? 10 : 5,
     ...(image ? { promptImage: image } : {}),
   }
-  const response = await fetch(`https://api.dev.runwayml.com/v1/${route}`, {
+  const runwayBase = 'https://api.dev.runwayml.com/v1/'
+  const response = await fetch(await resolveProviderEndpoint('runway', route, runwayBase), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -406,13 +442,17 @@ async function runRunway(input: VideoGenerationInput): Promise<VideoGenerationRe
     'Runway',
   )
   if (!task.id) throw new Error('Runway did not return a task ID.')
+  await input.onTaskCreated?.({ provider: 'runway', model: 'gen4.5', taskId: task.id })
 
   while (!['SUCCEEDED', 'FAILED', 'CANCELED'].includes(task.status || '')) {
     await new Promise((resolve) => setTimeout(resolve, Math.min(5_000, deadline - Date.now())))
-    const pollResponse = await fetch(`https://api.dev.runwayml.com/v1/tasks/${task.id}`, {
-      headers: { Authorization: `Bearer ${apiKey}`, 'X-Runway-Version': '2024-11-06' },
-      signal: requestTimeout(deadline),
-    })
+    const pollResponse = await fetch(
+      await resolveProviderEndpoint('runway', `tasks/${task.id}`, runwayBase),
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'X-Runway-Version': '2024-11-06' },
+        signal: requestTimeout(deadline),
+      },
+    )
     task = await readJSON(pollResponse, 'Runway')
   }
   if (task.status !== 'SUCCEEDED') {
@@ -440,4 +480,141 @@ export async function generateVideoWithProvider(
     return runRunway(input)
   }
   throw new Error(`Unsupported video model “${input.provider} · ${input.model}”.`)
+}
+
+export async function checkVideoGenerationTask(input: {
+  provider: string
+  model: string
+  taskId: string
+}): Promise<VideoTaskCheck> {
+  if (input.provider === 'replicate' && input.model === 'bytedance/seedance-2.5') {
+    const token = requireKey('REPLICATE_API_TOKEN')
+    const response = await fetch(
+      await resolveProviderEndpoint(
+        'replicate',
+        `predictions/${encodeURIComponent(input.taskId)}`,
+        'https://api.replicate.com/v1/',
+      ),
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) },
+    )
+    const prediction = await readJSON<{ status?: string; output?: unknown; error?: string }>(
+      response,
+      'Replicate',
+    )
+    const status = prediction.status?.toLowerCase()
+    if (status === 'succeeded') {
+      const value = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output
+      const url = mediaUrl(value)
+      return url
+        ? { status: 'succeeded', url }
+        : { status: 'failed', error: 'Replicate completed without a video URL.' }
+    }
+    if (status === 'failed')
+      return { status: 'failed', error: prediction.error || 'Replicate video generation failed.' }
+    if (status === 'canceled' || status === 'cancelled')
+      return { status: 'cancelled', error: 'Replicate video generation was cancelled.' }
+    return { status: 'pending' }
+  }
+
+  if (input.provider === 'runway' && input.model === 'gen4.5') {
+    const apiKey = requireKey('RUNWAYML_API_SECRET')
+    const response = await fetch(
+      await resolveProviderEndpoint(
+        'runway',
+        `tasks/${encodeURIComponent(input.taskId)}`,
+        'https://api.dev.runwayml.com/v1/',
+      ),
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'X-Runway-Version': '2024-11-06' },
+        signal: AbortSignal.timeout(30_000),
+      },
+    )
+    const task = await readJSON<{ status?: string; output?: unknown; failure?: string }>(
+      response,
+      'Runway',
+    )
+    const status = task.status?.toUpperCase()
+    if (status === 'SUCCEEDED') {
+      const value = Array.isArray(task.output) ? task.output[0] : task.output
+      const url = mediaUrl(value)
+      return url
+        ? { status: 'succeeded', url }
+        : { status: 'failed', error: 'Runway completed without a video URL.' }
+    }
+    if (status === 'FAILED')
+      return { status: 'failed', error: task.failure || 'Runway video generation failed.' }
+    if (status === 'CANCELED' || status === 'CANCELLED')
+      return { status: 'cancelled', error: 'Runway video generation was cancelled.' }
+    return { status: 'pending' }
+  }
+
+  if (input.provider === 'gemini' && input.model === 'veo-3.1-fast-generate-preview') {
+    const apiKey = requireKey('APP_GEMINI_API_KEY')
+    const operation = input.taskId.replace(/^\/+/, '')
+    const response = await fetch(
+      await resolveProviderEndpoint(
+        'gemini',
+        operation,
+        'https://generativelanguage.googleapis.com/v1beta/',
+      ),
+      { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(30_000) },
+    )
+    const result = await readJSON<{
+      done?: boolean
+      error?: { message?: string }
+      response?: {
+        generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }> }
+      }
+    }>(response, 'Veo 3.1 Fast')
+    if (!result.done) return { status: 'pending' }
+    if (result.error?.message) return { status: 'failed', error: result.error.message }
+    const uri = result.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+    if (!uri) return { status: 'failed', error: 'Veo completed without a video URL.' }
+    return {
+      status: 'succeeded',
+      url: await downloadGoogleVideo(uri, apiKey, deadlineFor(120_000)),
+    }
+  }
+
+  if (input.provider === 'gemini' && input.model === 'gemini-omni-1.1-flash') {
+    const apiKey = requireKey('APP_GEMINI_API_KEY')
+    const response = await fetch(
+      await resolveProviderEndpoint(
+        'gemini',
+        `interactions/${encodeURIComponent(input.taskId)}`,
+        'https://generativelanguage.googleapis.com/v1beta/',
+      ),
+      { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(30_000) },
+    )
+    const interaction = await readJSON<{
+      status?: string
+      steps?: Array<{
+        type?: string
+        content?: Array<{ type?: string; data?: string; uri?: string }>
+      }>
+    }>(response, 'Gemini Omni Flash')
+    const status = interaction.status?.toLowerCase()
+    if (status && !['completed', 'succeeded', 'done'].includes(status)) {
+      if (['failed', 'cancelled', 'canceled'].includes(status)) {
+        return {
+          status: status === 'failed' ? 'failed' : 'cancelled',
+          error: `Gemini interaction ${status}.`,
+        }
+      }
+      return { status: 'pending' }
+    }
+    const video = interaction.steps
+      ?.filter((step) => step.type === 'model_output')
+      .flatMap((step) => step.content || [])
+      .find((content) => content.type === 'video')
+    if (video?.data) return { status: 'succeeded', url: `data:video/mp4;base64,${video.data}` }
+    if (video?.uri)
+      return {
+        status: 'succeeded',
+        url: await downloadGoogleVideo(video.uri, apiKey, deadlineFor(120_000)),
+      }
+    return { status: 'pending' }
+  }
+
+  throw new Error(`Task status checks are not supported for “${input.provider} · ${input.model}”.`)
 }

@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { AuthenticatedUser } from 'payload'
 import { PayloadWorkflowRepository, type PayloadLocalApi } from './payload-workflow-repository'
 
+const testUser = { id: 'user-1', collection: 'users' } as unknown as AuthenticatedUser
+
 function createRepository(updateOne: ReturnType<typeof vi.fn>) {
-  return new PayloadWorkflowRepository({
-    db: { updateOne },
-  } as unknown as PayloadLocalApi)
+  return new PayloadWorkflowRepository(
+    {
+      db: { updateOne },
+    } as unknown as PayloadLocalApi,
+    testUser,
+  )
 }
 
 describe('PayloadWorkflowRepository', () => {
@@ -14,10 +20,13 @@ describe('PayloadWorkflowRepository', () => {
       .mockResolvedValueOnce({ docs: [{ id: 'workflow-1' }], hasNextPage: true, nextPage: 2 })
       .mockResolvedValueOnce({ docs: [{ id: 'workflow-2' }], hasNextPage: false, nextPage: null })
       .mockResolvedValueOnce({ docs: [{ id: 'execution-1' }], hasNextPage: false, nextPage: null })
-    const repository = new PayloadWorkflowRepository({
-      db: { updateOne: vi.fn() },
-      find,
-    } as unknown as PayloadLocalApi)
+    const repository = new PayloadWorkflowRepository(
+      {
+        db: { updateOne: vi.fn() },
+        find,
+      } as unknown as PayloadLocalApi,
+      testUser,
+    )
 
     await expect(repository.listAllWorkflows()).resolves.toEqual([
       { id: 'workflow-1' },
@@ -25,14 +34,17 @@ describe('PayloadWorkflowRepository', () => {
     ])
     await expect(repository.listAllExecutions()).resolves.toEqual([{ id: 'execution-1' }])
 
-    expect(find).toHaveBeenNthCalledWith(1, {
-      collection: 'workflows',
-      overrideAccess: false,
-      depth: 0,
-      limit: 100,
-      sort: '-updatedAt',
-      page: 1,
-    })
+    expect(find).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        collection: 'workflows',
+        overrideAccess: false,
+        depth: 0,
+        limit: 100,
+        sort: '-updatedAt',
+        page: 1,
+      }),
+    )
     expect(find).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ collection: 'workflows', page: 2 }),
@@ -56,18 +68,20 @@ describe('PayloadWorkflowRepository', () => {
     ).resolves.toBe('claimed')
 
     expect(updateOne).toHaveBeenCalledOnce()
-    expect(updateOne).toHaveBeenCalledWith({
-      collection: 'workflows',
-      where: {
-        and: [{ id: { equals: 'workflow-1' } }, { status: { not_equals: 'running' } }],
-      },
-      data: {
-        status: 'running',
-        lastExecutionAt: '2026-11-06T00:00:00.000Z',
-        updatedAt: '2026-11-06T00:00:00.000Z',
-      },
-      options: { atomic: true },
-    })
+    expect(updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'workflows',
+        where: {
+          and: [{ id: { equals: 'workflow-1' } }, { status: { not_equals: 'running' } }],
+        },
+        data: {
+          status: 'running',
+          lastExecutionAt: '2026-11-06T00:00:00.000Z',
+          updatedAt: '2026-11-06T00:00:00.000Z',
+        },
+        options: { atomic: true },
+      }),
+    )
   })
 
   it('reclaims only a stale running workflow and rejects a fresh run', async () => {

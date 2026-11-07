@@ -81,6 +81,10 @@ class MemoryWorkflowRepository implements WorkflowRepository {
     return [...this.executions.values()].filter((execution) => execution.workflow === workflowId)
   }
 
+  async findExecutionById(id: string) {
+    return this.executions.get(id) ?? null
+  }
+
   async listAllExecutions() {
     return [...this.executions.values()]
   }
@@ -296,6 +300,161 @@ describe('WorkflowService', () => {
     })
   })
 
+  it('links a node retry to its failed execution after validating ownership and node status', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate',
+          position: { x: 0, y: 0 },
+          config: { prompt: 'A blue ceramic vase' },
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(definition))
+    repository.executions.set('execution-failed', {
+      id: 'execution-failed',
+      workflow: 'workflow-string-id',
+      status: 'failed',
+      scope: 'node:generate:with-dependencies',
+      startedAt: '2026-11-05T00:00:00.000Z',
+      snapshot: definition,
+      nodeRecords: [{ nodeId: 'generate', status: 'failed', error: 'Provider unavailable.' }],
+      logs: [],
+      createdAt: '2026-11-05T00:00:00.000Z',
+      updatedAt: '2026-11-05T00:00:01.000Z',
+    })
+    const service = new WorkflowService(
+      repository,
+      vi.fn(async () => successfulRun),
+    )
+
+    await service.execute('workflow-string-id', {
+      targetNodeId: 'generate',
+      retryOfExecutionId: 'execution-failed',
+    })
+
+    expect(repository.executionCreates[0].retryOf).toBe('execution-failed')
+  })
+
+  it('rejects retry links to another workflow or a successful node', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate',
+          position: { x: 0, y: 0 },
+          config: { prompt: 'A blue ceramic vase' },
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(definition))
+    repository.executions.set('execution-other-workflow', {
+      id: 'execution-other-workflow',
+      workflow: 'someone-elses-workflow',
+      status: 'failed',
+      scope: 'node:generate:with-dependencies',
+      startedAt: '2026-11-05T00:00:00.000Z',
+      snapshot: definition,
+      nodeRecords: [{ nodeId: 'generate', status: 'failed' }],
+      logs: [],
+      createdAt: '2026-11-05T00:00:00.000Z',
+      updatedAt: '2026-11-05T00:00:01.000Z',
+    })
+    repository.executions.set('execution-succeeded', {
+      id: 'execution-succeeded',
+      workflow: 'workflow-string-id',
+      status: 'succeeded',
+      scope: 'node:generate:with-dependencies',
+      startedAt: '2026-11-05T00:00:00.000Z',
+      snapshot: definition,
+      nodeRecords: [{ nodeId: 'generate', status: 'succeeded' }],
+      logs: [],
+      createdAt: '2026-11-05T00:00:00.000Z',
+      updatedAt: '2026-11-05T00:00:01.000Z',
+    })
+    const service = new WorkflowService(
+      repository,
+      vi.fn(async () => successfulRun),
+    )
+
+    await expect(
+      service.execute('workflow-string-id', {
+        targetNodeId: 'generate',
+        retryOfExecutionId: 'execution-other-workflow',
+      }),
+    ).rejects.toThrow('The selected execution cannot be retried for this node.')
+    await expect(
+      service.execute('workflow-string-id', {
+        targetNodeId: 'generate',
+        retryOfExecutionId: 'execution-succeeded',
+      }),
+    ).rejects.toThrow('The selected execution cannot be retried for this node.')
+    expect(repository.executionCreates).toEqual([])
+  })
+
+  it('retries saving an execution output idempotently without changing its input snapshot', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate',
+          position: { x: 0, y: 0 },
+          config: { prompt: 'A blue ceramic vase' },
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(definition))
+    const generatedOutputs = {
+      image: { type: 'image' as const, value: { url: 'https://media.example/result.png' } },
+    }
+    repository.executions.set('execution-1', {
+      id: 'execution-1',
+      workflow: 'workflow-string-id',
+      status: 'succeeded',
+      scope: 'workflow',
+      startedAt: '2026-11-05T00:00:00.000Z',
+      snapshot: definition,
+      nodeRecords: [{ nodeId: 'generate', status: 'succeeded', outputs: generatedOutputs }],
+      logs: [],
+      createdAt: '2026-11-05T00:00:00.000Z',
+      updatedAt: '2026-11-05T00:00:01.000Z',
+    })
+    const persistedOutputs = {
+      image: {
+        type: 'image' as const,
+        value: { url: '/media/generated.png', assetId: 'asset-1', filename: 'generated.png' },
+        assetId: 'asset-1',
+        metadata: { assetId: 'asset-1', savedToAssets: true },
+      },
+    }
+    const mediaPersister = {
+      persist: vi.fn(async () => ({ outputs: persistedOutputs })),
+    }
+    const service = new WorkflowService(
+      repository,
+      vi.fn(async () => successfulRun),
+      undefined,
+      mediaPersister as unknown as import('./workflow-media-persister').WorkflowMediaPersister,
+    )
+
+    const result = await service.saveNodeOutputToAssets('workflow-string-id', 'generate')
+
+    expect(mediaPersister.persist).toHaveBeenCalledOnce()
+    expect(repository.executionWrites[0].nodeRecords?.[0].outputs).toEqual(persistedOutputs)
+    expect(repository.executions.get('execution-1')?.snapshot).toEqual(definition)
+    expect(result).toMatchObject({ executionId: 'execution-1', nodeId: 'generate' })
+  })
+
   it('rejects concurrent execution requests before creating a second execution', async () => {
     const repository = new MemoryWorkflowRepository(createWorkflowDocument())
     let finishRun: (() => void) | undefined
@@ -476,5 +635,202 @@ describe('WorkflowService', () => {
 
     await expect(service.execute('missing', {})).resolves.toBeNull()
     expect(runWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('cancels an active execution after confirming workflow access', async () => {
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument())
+    let runSignal: AbortSignal | undefined
+    const runWorkflow: WorkflowRunner = (_definition, _target, options) =>
+      new Promise((resolve) => {
+        runSignal = options?.signal
+        runSignal?.addEventListener(
+          'abort',
+          () => resolve({ status: 'cancelled', records: [], logs: [] }),
+          { once: true },
+        )
+      })
+    const service = new WorkflowService(repository, runWorkflow)
+    const executionPromise = service.execute('workflow-string-id', {})
+
+    await vi.waitFor(() => expect(runSignal).toBeDefined())
+    await expect(service.cancel('workflow-string-id')).resolves.toBe(true)
+    await expect(executionPromise).resolves.toMatchObject({ status: 'cancelled' })
+    expect(repository.executionWrites.at(-1)?.status).toBe('cancelled')
+    await expect(service.cancel('missing')).resolves.toBe(false)
+  })
+
+  it('checks a saved video task and resumes its original group execution without resubmitting it', async () => {
+    const snapshot: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'video',
+          type: 'ai.generate-video',
+          name: 'Generate video',
+          position: { x: 0, y: 0 },
+          config: { provider: 'replicate', model: 'bytedance/seedance-2.5', prompt: 'A sunrise' },
+        },
+        {
+          id: 'save',
+          type: 'output.save-video',
+          name: 'Save video',
+          position: { x: 300, y: 0 },
+          config: { fileName: 'sunrise.mp4' },
+        },
+        {
+          id: 'unrelated',
+          type: 'input.text',
+          name: 'Unrelated',
+          position: { x: 0, y: 300 },
+          config: { value: 'Keep out of scope' },
+        },
+      ],
+      edges: [
+        {
+          id: 'video-save',
+          source: 'video',
+          sourceHandle: 'video',
+          target: 'save',
+          targetHandle: 'video',
+        },
+      ],
+      groups: [
+        {
+          id: 'group-1',
+          name: 'Delivery',
+          nodeIds: ['save'],
+          position: { x: 0, y: 0 },
+          width: 640,
+          height: 320,
+        },
+      ],
+    }
+    const repository = new MemoryWorkflowRepository({
+      ...createWorkflowDocument(snapshot),
+      status: 'running',
+      lastExecutionAt: '2026-11-07T10:00:00.000Z',
+    })
+    repository.executions.set('execution-1', {
+      id: 'execution-1',
+      workflow: 'workflow-string-id',
+      status: 'running',
+      scope: 'group:group-1',
+      startedAt: '2026-11-07T10:00:00.000Z',
+      snapshot,
+      nodeRecords: [
+        {
+          nodeId: 'video',
+          status: 'running',
+          startedAt: '2026-11-07T10:00:01.000Z',
+          providerTask: {
+            provider: 'replicate',
+            model: 'bytedance/seedance-2.5',
+            taskId: 'provider-task-1',
+          },
+        },
+      ],
+      logs: [],
+      createdAt: '2026-11-07T10:00:00.000Z',
+      updatedAt: '2026-11-07T10:00:01.000Z',
+    })
+    const resumedRunner = vi.fn(
+      async (_definition: WorkflowDefinition, _targetNodeId: string | undefined, options) => ({
+        status: 'succeeded' as const,
+        records: options?.initialRecords ?? [],
+        logs: [],
+      }),
+    )
+    const mediaPersister = {
+      persist: vi.fn(async () => ({
+        outputs: {
+          video: {
+            type: 'video' as const,
+            value: { url: '/api/media/file/sunrise.mp4' },
+            assetId: 'asset-video-1',
+          },
+        },
+      })),
+    }
+    const service = new WorkflowService(
+      repository,
+      resumedRunner,
+      () => new Date('2026-11-07T12:00:00.000Z'),
+      mediaPersister as unknown as import('./workflow-media-persister').WorkflowMediaPersister,
+      vi.fn(async () => ({
+        status: 'succeeded' as const,
+        url: 'https://provider.example/sunrise.mp4',
+      })),
+    )
+
+    const result = await service.refreshVideoTask('execution-1', 'workflow-string-id')
+
+    expect(result.status).toBe('resumed')
+    expect(repository.executionCreates).toHaveLength(0)
+    expect(mediaPersister.persist).toHaveBeenCalledOnce()
+    expect(resumedRunner).toHaveBeenCalledOnce()
+    expect(resumedRunner.mock.calls[0][2]).toMatchObject({ targetNodeIds: ['save'] })
+    expect(resumedRunner.mock.calls[0][2]?.initialRecords).toContainEqual(
+      expect.objectContaining({
+        nodeId: 'video',
+        status: 'succeeded',
+        outputs: { video: expect.objectContaining({ assetId: 'asset-video-1' }) },
+      }),
+    )
+    expect(repository.executions.get('execution-1')).toMatchObject({ status: 'succeeded' })
+    expect(
+      repository.executions.get('execution-1')?.nodeRecords.map((record) => record.nodeId),
+    ).toEqual(expect.arrayContaining(['video']))
+  })
+
+  it('records a pending status poll without starting another execution', async () => {
+    const snapshot: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'video',
+          type: 'ai.generate-video',
+          name: 'Video',
+          position: { x: 0, y: 0 },
+          config: {},
+        },
+      ],
+      edges: [],
+    }
+    const repository = new MemoryWorkflowRepository(createWorkflowDocument(snapshot))
+    repository.executions.set('execution-1', {
+      id: 'execution-1',
+      workflow: 'workflow-string-id',
+      status: 'interrupted',
+      scope: 'workflow',
+      startedAt: '2026-11-07T10:00:00.000Z',
+      snapshot,
+      nodeRecords: [
+        {
+          nodeId: 'video',
+          status: 'running',
+          providerTask: { provider: 'replicate', model: 'seedance', taskId: 'pending-task' },
+        },
+      ],
+      logs: [],
+      createdAt: '2026-11-07T10:00:00.000Z',
+      updatedAt: '2026-11-07T10:00:01.000Z',
+    })
+    const runner = vi.fn(async () => successfulRun)
+    const service = new WorkflowService(
+      repository,
+      runner,
+      () => new Date('2026-11-07T12:00:00.000Z'),
+      undefined,
+      vi.fn(async () => ({ status: 'pending' as const })),
+    )
+
+    const result = await service.refreshVideoTask('execution-1')
+
+    expect(result.status).toBe('pending')
+    expect(runner).not.toHaveBeenCalled()
+    expect(repository.executionCreates).toHaveLength(0)
+    expect(
+      repository.executions.get('execution-1')?.nodeRecords[0].providerTask?.lastPolledAt,
+    ).toBe('2026-11-07T12:00:00.000Z')
   })
 })

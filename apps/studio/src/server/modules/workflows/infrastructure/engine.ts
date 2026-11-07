@@ -14,6 +14,7 @@ import type {
 } from '@znith/contracts'
 import type { WorkflowRunOptions } from '../application/workflow-service.types'
 import { generateVideoWithProvider } from './video-provider-adapters'
+import { resolveProviderEndpoint, resolveProviderKey } from '../../providers/credential-context'
 
 export { workflowDefinitionSchema } from '@znith/contracts'
 
@@ -71,12 +72,11 @@ function requireSecret(
     | 'APP_GEMINI_API_KEY'
     | 'REPLICATE_API_TOKEN',
 ) {
-  const value = process.env[name]
-  if (!value)
-    throw new Error(
-      `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Set the ${name} server environment variable.`,
-    )
-  return value
+  return resolveProviderKey(name)
+}
+
+async function providerURL(provider: 'openai' | 'gemini', path: string, fallback: string) {
+  return resolveProviderEndpoint(provider, path, fallback)
 }
 
 function chatGPT2APIEndpoint(path: 'images/generations' | 'images/edits') {
@@ -263,6 +263,11 @@ async function runMuse2APIVideo(input: {
   duration: number
   referenceImage?: string
   timeoutMs: number
+  onTaskCreated?: (task: {
+    provider: string
+    model: string
+    taskId: string
+  }) => Promise<void> | void
 }) {
   const apiKey = requireSecret('APP_MUSE2API_API_KEY')
   const baseURL = muse2APIEndpoint()
@@ -294,6 +299,11 @@ async function runMuse2APIVideo(input: {
     )
   }
   if (!createTask.id) throw new Error('Muse2API did not return a video task ID.')
+  await input.onTaskCreated?.({
+    provider: 'muse2api',
+    model: input.model || 'muse-video',
+    taskId: createTask.id,
+  })
 
   let task = createTask
   const terminalStatuses = new Set(['succeeded', 'failed', 'canceled', 'cancelled', 'interrupted'])
@@ -320,6 +330,38 @@ async function runMuse2APIVideo(input: {
     providerJobId: createTask.id,
     model: task.model || input.model || 'muse-video',
   }
+}
+
+export async function checkMuse2APIVideoTask(taskId: string) {
+  const apiKey = requireSecret('APP_MUSE2API_API_KEY')
+  const response = await fetch(
+    muse2APIEndpoint(`videos/${encodeURIComponent(taskId)}`).toString(),
+    {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(30_000),
+      redirect: 'error',
+    },
+  )
+  const task = (await response.json().catch(() => ({}))) as Muse2APITask
+  if (!response.ok)
+    throw new Error(muse2APIError(task, `Muse2API task polling failed (${response.status}).`))
+  const status = task.status?.toLowerCase()
+  if (status === 'succeeded') {
+    return task.result?.url
+      ? {
+          status: 'succeeded' as const,
+          url: new URL(task.result.url, muse2APIEndpoint()).toString(),
+        }
+      : { status: 'failed' as const, error: 'Muse2API completed without a video URL.' }
+  }
+  if (status === 'failed')
+    return {
+      status: 'failed' as const,
+      error: muse2APIError(task, 'Muse2API video generation failed.'),
+    }
+  if (status === 'canceled' || status === 'cancelled')
+    return { status: 'cancelled' as const, error: 'Muse2API video generation was cancelled.' }
+  return { status: 'pending' as const }
 }
 
 async function runReplicate(model: string, input: Record<string, unknown>) {
@@ -357,19 +399,32 @@ async function runReplicate(model: string, input: Record<string, unknown>) {
   return { url, providerJobId: prediction.id }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal) {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('Execution was cancelled.'))
+      return
+    }
     const timer = setTimeout(
       () => reject(new Error(`Node timed out after ${timeoutMs} ms.`)),
       timeoutMs,
     )
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(
+        signal?.reason instanceof Error ? signal.reason : new Error('Execution was cancelled.'),
+      )
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
     promise.then(
       (value) => {
         clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
         resolve(value)
       },
       (error) => {
         clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
         reject(error)
       },
     )
@@ -506,7 +561,11 @@ async function generateText(node: WorkflowNode, prompt: string) {
       ? undefined
       : { temperature: Number(node.config.temperature ?? 0.7) }
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${key}`,
+      await providerURL(
+        'gemini',
+        `models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+        'https://generativelanguage.googleapis.com/v1beta/',
+      ),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -533,21 +592,24 @@ async function generateText(node: WorkflowNode, prompt: string) {
     const result = await callCustomProvider(node, { task: 'text', prompt, systemPrompt: system })
     return { value: text(result.text || result.output || result.content), usage: result.usage }
   }
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${requireSecret('APP_OPENAI_API_KEY')}`,
-      'Content-Type': 'application/json',
+  const response = await fetch(
+    await providerURL('openai', 'chat/completions', 'https://api.openai.com/v1/'),
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${requireSecret('APP_OPENAI_API_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model || 'gpt-4o-mini',
+        temperature: Number(node.config.temperature ?? 0.7),
+        messages: [
+          ...(system ? [{ role: 'system', content: system }] : []),
+          { role: 'user', content: prompt },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model: model || 'gpt-4o-mini',
-      temperature: Number(node.config.temperature ?? 0.7),
-      messages: [
-        ...(system ? [{ role: 'system', content: system }] : []),
-        { role: 'user', content: prompt },
-      ],
-    }),
-  })
+  )
   const result = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>
     error?: { message?: string }
@@ -560,6 +622,12 @@ async function generateText(node: WorkflowNode, prompt: string) {
 async function executeNode(
   node: WorkflowNode,
   inputs: Record<string, NodeValue[]>,
+  options: {
+    onProviderTask?: (
+      nodeId: string,
+      task: { provider: string; model: string; taskId: string },
+    ) => Promise<void> | void
+  } = {},
 ): Promise<Record<string, NodeValue>> {
   switch (node.type) {
     case 'input.text':
@@ -581,6 +649,21 @@ async function executeNode(
       return {
         [type]: {
           type,
+          value: {
+            url,
+            fileName: node.config.fileName,
+            mimeType: node.config.mimeType,
+          },
+          assetId: text(node.config.assetId) || undefined,
+        },
+      }
+    }
+    case 'input.audio': {
+      const url = text(node.config.url)
+      if (!url) throw new Error('Upload an audio file before running this node.')
+      return {
+        audio: {
+          type: 'audio',
           value: {
             url,
             fileName: node.config.fileName,
@@ -701,6 +784,13 @@ async function executeNode(
           metadata: { ...inputs.video[0].metadata, fileName: node.config.fileName },
         },
       }
+    case 'output.save-audio':
+      return {
+        audio: {
+          ...inputs.audio[0],
+          metadata: { ...inputs.audio[0].metadata, fileName: node.config.fileName },
+        },
+      }
     case 'ai.analyze-image': {
       const provider = text(node.config.provider || 'openai')
       const imageURL = absoluteMediaURL(inputs.image[0].value)
@@ -756,7 +846,11 @@ async function executeNode(
         }
         const key = requireSecret('APP_GEMINI_API_KEY')
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(text(node.config.model))}:generateContent?key=${key}`,
+          await providerURL(
+            'gemini',
+            `models/${encodeURIComponent(text(node.config.model))}:generateContent?key=${encodeURIComponent(key)}`,
+            'https://generativelanguage.googleapis.com/v1beta/',
+          ),
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -785,22 +879,25 @@ async function executeNode(
         }
       }
       const apiKey = requireSecret('APP_OPENAI_API_KEY')
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: text(node.config.model || 'gpt-4o-mini'),
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: text(node.config.prompt) },
-                { type: 'image_url', image_url: { url: imageURL } },
-              ],
-            },
-          ],
-        }),
-      })
+      const response = await fetch(
+        await providerURL('openai', 'chat/completions', 'https://api.openai.com/v1/'),
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: text(node.config.model || 'gpt-4o-mini'),
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: text(node.config.prompt) },
+                  { type: 'image_url', image_url: { url: imageURL } },
+                ],
+              },
+            ],
+          }),
+        },
+      )
       const payload = (await response.json()) as {
         choices?: Array<{ message?: { content?: string } }>
         error?: { message?: string }
@@ -896,11 +993,14 @@ async function executeNode(
             `reference-${index + 1}.png`,
           )
         }
-        const response = await fetch('https://api.openai.com/v1/images/edits', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}` },
-          body: form,
-        })
+        const response = await fetch(
+          await providerURL('openai', 'images/edits', 'https://api.openai.com/v1/'),
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${apiKey}` },
+            body: form,
+          },
+        )
         const payload = (await response.json()) as {
           data?: Array<{ url?: string; revised_prompt?: string }>
           error?: { message?: string }
@@ -922,18 +1022,21 @@ async function executeNode(
           },
         }
       }
-      const response = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: text(node.config.model || 'dall-e-3'),
-          prompt,
-          size,
-          quality: node.config.quality,
-          response_format: 'url',
-          n: 1,
-        }),
-      })
+      const response = await fetch(
+        await providerURL('openai', 'images/generations', 'https://api.openai.com/v1/'),
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: text(node.config.model || 'dall-e-3'),
+            prompt,
+            size,
+            quality: node.config.quality,
+            response_format: 'url',
+            n: 1,
+          }),
+        },
+      )
       const payload = (await response.json()) as {
         data?: Array<{ url?: string; revised_prompt?: string }>
         error?: { message?: string }
@@ -986,11 +1089,14 @@ async function executeNode(
         }),
         'source.png',
       )
-      const response = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      })
+      const response = await fetch(
+        await providerURL('openai', 'images/edits', 'https://api.openai.com/v1/'),
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+        },
+      )
       const payload = (await response.json()) as {
         data?: Array<{ url?: string; b64_json?: string }>
         error?: { message?: string }
@@ -1055,6 +1161,7 @@ async function executeNode(
             ? await muse2APIReferenceImage(inputs.image[0].value)
             : undefined,
           timeoutMs: Number(node.config.timeoutMs) || 300_000,
+          onTaskCreated: (task) => options.onProviderTask?.(node.id, task),
         })
         return {
           video: {
@@ -1100,6 +1207,7 @@ async function executeNode(
           image: inputs.image?.length ? inputs.image[0].value : undefined,
           video: inputs.video?.length ? inputs.video[0].value : undefined,
           timeoutMs: Number(node.config.timeoutMs) || 300_000,
+          onTaskCreated: (task) => options.onProviderTask?.(node.id, task),
         })
         return {
           video: {
@@ -1158,6 +1266,61 @@ async function executeNode(
         },
       }
     }
+    case 'ai.generate-audio': {
+      if (text(node.config.provider || 'openai') !== 'openai') {
+        throw new Error('Audio generation is currently available through OpenAI only.')
+      }
+      const prompt = text(inputs.prompt?.[0]?.value || node.config.prompt).trim()
+      if (!prompt) throw new Error('Enter text or connect a Prompt node before generating audio.')
+      const apiKey = requireSecret('APP_OPENAI_API_KEY')
+      const format = text(node.config.format || 'mp3')
+      const response = await fetch(
+        await providerURL('openai', 'audio/speech', 'https://api.openai.com/v1/'),
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: text(node.config.model || 'gpt-4o-mini-tts'),
+            input: prompt,
+            voice: text(node.config.voice || 'alloy'),
+            response_format: format,
+            speed: Number(node.config.speed) || 1,
+            instructions: text(node.config.instructions) || undefined,
+          }),
+          signal: AbortSignal.timeout(
+            clampNumber(Number(node.config.timeoutMs) || 120_000, 100, 300_000),
+          ),
+        },
+      )
+      if (!response.ok) {
+        const failure = (await response.json().catch(() => ({}))) as {
+          error?: { message?: string }
+        }
+        throw new Error(
+          failure.error?.message || `OpenAI audio request failed (${response.status}).`,
+        )
+      }
+      const contentType = response.headers.get('content-type')?.split(';', 1)[0] || 'audio/mpeg'
+      if (!contentType.startsWith('audio/'))
+        throw new Error('OpenAI returned an unsupported audio format.')
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (!bytes.length || bytes.byteLength > 50 * 1024 * 1024) {
+        throw new Error('Generated audio must be between 1 byte and 50 MB to save locally.')
+      }
+      return {
+        audio: {
+          type: 'audio',
+          value: { url: `data:${contentType};base64,${bytes.toString('base64')}` },
+          metadata: {
+            provider: 'openai',
+            model: text(node.config.model || 'gpt-4o-mini-tts'),
+            mimeType: contentType,
+            fileSize: bytes.byteLength,
+            prompt,
+          },
+        },
+      }
+    }
     default: {
       const definition = registryByType.get(node.type)
       throw new Error(
@@ -1167,11 +1330,29 @@ async function executeNode(
   }
 }
 
+export async function runStudioNode(
+  node: WorkflowNode,
+  inputs: Record<string, NodeValue[]> = {},
+  options: {
+    signal?: AbortSignal
+    onProviderTask?: (
+      nodeId: string,
+      task: { provider: string; model: string; taskId: string },
+    ) => Promise<void> | void
+  } = {},
+): Promise<Record<string, NodeValue>> {
+  const timeoutMs = clampNumber(Number(node.config.timeoutMs) || 120_000, 100, 300_000)
+  return withTimeout(executeNode(node, inputs, options), timeoutMs, options.signal)
+}
+
 function selectedMediaOutput(node: WorkflowNode): Record<string, NodeValue> | undefined {
   const selected = node.config.selectedOutput
   if (!selected || typeof selected !== 'object' || Array.isArray(selected)) return undefined
   const value = selected as Partial<NodeValue>
-  if ((value.type !== 'image' && value.type !== 'video') || value.value === undefined)
+  if (
+    (value.type !== 'image' && value.type !== 'video' && value.type !== 'audio') ||
+    value.value === undefined
+  )
     return undefined
   const port = registryByType.get(node.type)?.outputs.find((item) => item.dataType === value.type)
   if (!port) return undefined
@@ -1195,11 +1376,30 @@ export async function runWorkflow(
     }
   }
   try {
-    const sorted = validateWorkflowDefinition(definition, targetNodeId)
+    const sorted = validateWorkflowDefinition(definition, targetNodeId, options.targetNodeIds)
     const included = new Set(sorted.map((node) => node.id))
-    const pending = new Map(sorted.map((node) => [node.id, node]))
     const finished = new Map<string, NodeExecutionRecord>()
     const recordIndexes = new Map<string, number>()
+    const reusableStatuses = new Set(['succeeded', 'failed', 'skipped'])
+    const initialRecords = new Map(
+      (options.initialRecords ?? [])
+        .filter((record) => included.has(record.nodeId) && reusableStatuses.has(record.status))
+        .map((record) => [record.nodeId, record]),
+    )
+    for (const node of sorted) {
+      const record = initialRecords.get(node.id)
+      if (!record) continue
+      const savedRecord = structuredClone(record)
+      recordIndexes.set(node.id, records.length)
+      records.push(savedRecord)
+      finished.set(node.id, savedRecord)
+      if (savedRecord.status === 'succeeded' && savedRecord.outputs) {
+        outputs.set(node.id, structuredClone(savedRecord.outputs))
+      }
+    }
+    const pending = new Map(
+      sorted.filter((node) => !finished.has(node.id)).map((node) => [node.id, node]),
+    )
     const concurrency = clampNumber(options.concurrency ?? 4, 1, 16)
     const persistRecord = async (record: NodeExecutionRecord) => {
       const recordIndex = recordIndexes.get(record.nodeId)
@@ -1221,7 +1421,7 @@ export async function runWorkflow(
       }
     }
 
-    for (const node of sorted) {
+    for (const node of sorted.filter((item) => pending.has(item.id))) {
       await persistRecord({ nodeId: node.id, status: 'queued' })
       await emitLog({
         at: new Date().toISOString(),
@@ -1264,14 +1464,22 @@ export async function runWorkflow(
           result = await withTimeout(
             Promise.resolve(
               storedMediaOutput ??
-                executeNode(node, resolveInputs(node, definition.edges, outputs)),
+                executeNode(node, resolveInputs(node, definition.edges, outputs), {
+                  onProviderTask: (taskNodeId, task) => options.onProviderTask?.(taskNodeId, task),
+                }),
             ),
             timeoutMs,
+            options.signal,
           )
           successfulAttempt = attempt
           break
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Node execution failed.'
+          if (options.signal?.aborted) {
+            failureMessage =
+              'Execution was cancelled. The active provider request may continue until it finishes.'
+            break
+          }
           if (attempt < retryCount) {
             const delay = Math.min(10_000, 400 * 2 ** attempt)
             await emitLog({
@@ -1288,7 +1496,7 @@ export async function runWorkflow(
       }
 
       if (!result) {
-        record.status = 'failed'
+        record.status = options.signal?.aborted ? 'cancelled' : 'failed'
         record.completedAt = new Date().toISOString()
         record.durationMs = Date.now() - startedAt.getTime()
         record.error = failureMessage || 'Node execution failed.'
@@ -1299,6 +1507,16 @@ export async function runWorkflow(
           nodeId: node.id,
           message: `${node.name} failed: ${record.error}`,
         })
+        return record
+      }
+
+      if (options.signal?.aborted) {
+        record.status = 'cancelled'
+        record.completedAt = new Date().toISOString()
+        record.durationMs = Date.now() - startedAt.getTime()
+        record.error =
+          'Execution was cancelled. The active provider request may continue until it finishes.'
+        await persistRecord(record)
         return record
       }
 
@@ -1340,6 +1558,19 @@ export async function runWorkflow(
     }
 
     while (pending.size) {
+      if (options.signal?.aborted) {
+        for (const node of pending.values()) {
+          const record: NodeExecutionRecord = {
+            nodeId: node.id,
+            status: 'cancelled',
+            error: 'Skipped because the execution was cancelled.',
+          }
+          await persistRecord(record)
+          finished.set(node.id, record)
+        }
+        pending.clear()
+        break
+      }
       const ready = [...pending.values()].filter((node) => {
         const dependencies = definition.edges
           .filter((edge) => edge.target === node.id && included.has(edge.source))
@@ -1380,6 +1611,9 @@ export async function runWorkflow(
       }
     }
 
+    if (records.some((record) => record.status === 'cancelled')) {
+      return { status: 'cancelled', records, logs }
+    }
     const failed = records.find((record) => record.status === 'failed')
     if (failed) {
       const message = failed.error || 'Workflow execution failed.'

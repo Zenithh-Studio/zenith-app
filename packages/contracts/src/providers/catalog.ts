@@ -9,7 +9,7 @@ export type ProviderId =
   | 'comfyui'
   | 'custom-http'
 
-export type ProviderModality = 'text' | 'vision' | 'image' | 'video'
+export type ProviderModality = 'text' | 'vision' | 'image' | 'video' | 'audio'
 
 export interface ProviderInfo {
   id: ProviderId
@@ -23,11 +23,12 @@ export const providerCatalog: ProviderInfo[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    modalities: ['text', 'vision', 'image'],
+    modalities: ['text', 'vision', 'image', 'audio'],
     models: {
       text: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1'],
       vision: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1'],
       image: ['dall-e-3', 'dall-e-2', 'gpt-image-1'],
+      audio: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
     },
     credential: 'APP_OPENAI_API_KEY',
   },
