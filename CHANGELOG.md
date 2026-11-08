@@ -4,6 +4,17 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ## Unreleased
 
+## v0.3.1 - 2026-11-08
+
+### [Added]
+
+- Workflow and Studio reference uploads stay out of the Asset Library until explicitly saved.
+
+### [Fixed]
+
+- Image Studio size and count controls no longer overlap, workflow panels list every node, and audio previews use a compact layout.
+- The workspace toolbar places panel navigation on the left and documentation, settings, language, version, GitHub, and shortcuts on the right.
+
 ## v0.3.0 - 2026-11-08
 
 ### [Added]
