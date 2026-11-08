@@ -64,15 +64,23 @@ export type SupportedTimezones =
 export interface Config {
   auth: {
     admins: AdminAuthOperations;
+    users: UserAuthOperations;
   };
   blocks: {};
   collections: {
     admins: Admin;
+    users: User;
+    'admin-setup': AdminSetup;
+    'user-settings': UserSetting;
     media: Media;
+    'signup-attempts': SignupAttempt;
     folders: Folder;
     tags: Tag;
     workflows: Workflow;
     executions: Execution;
+    prompts: Prompt;
+    'text-assets': TextAsset;
+    'studio-generations': StudioGeneration;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -82,11 +90,18 @@ export interface Config {
   collectionsJoins: {};
   collectionsSelect: {
     admins: AdminsSelect<false> | AdminsSelect<true>;
+    users: UsersSelect<false> | UsersSelect<true>;
+    'admin-setup': AdminSetupSelect<false> | AdminSetupSelect<true>;
+    'user-settings': UserSettingsSelect<false> | UserSettingsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
+    'signup-attempts': SignupAttemptsSelect<false> | SignupAttemptsSelect<true>;
     folders: FoldersSelect<false> | FoldersSelect<true>;
     tags: TagsSelect<false> | TagsSelect<true>;
     workflows: WorkflowsSelect<false> | WorkflowsSelect<true>;
     executions: ExecutionsSelect<false> | ExecutionsSelect<true>;
+    prompts: PromptsSelect<false> | PromptsSelect<true>;
+    'text-assets': TextAssetsSelect<false> | TextAssetsSelect<true>;
+    'studio-generations': StudioGenerationsSelect<false> | StudioGenerationsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -107,7 +122,7 @@ export interface Config {
     activity: ActivityWidget;
     'upload-dropzone': UploadDropzoneWidget;
   };
-  user: Admin;
+  user: Admin | User;
   jobs: {
     tasks: unknown;
     workflows: unknown;
@@ -131,20 +146,48 @@ export interface AdminAuthOperations {
     password: string;
   };
 }
+export interface UserAuthOperations {
+  forgotPassword: {
+    email: string;
+    password: string;
+  };
+  login: {
+    email: string;
+    password: string;
+  };
+  registerFirstUser: {
+    email: string;
+    password: string;
+  };
+  unlock: {
+    email: string;
+    password: string;
+  };
+}
 /**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "admins".
  */
 export interface Admin {
   id: string;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
   email: string;
@@ -167,21 +210,207 @@ export interface Admin {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users".
+ */
+export interface User {
+  id: string;
+  name?: string | null;
+  role?: ('user' | 'admin') | null;
+  storageQuotaBytes?: number | null;
+  storageUsedBytes?: number | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
+  collection: 'users';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "admin-setup".
+ */
+export interface AdminSetup {
+  id: string;
+  setupKey: string;
+  claimedBy: string | User;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "user-settings".
+ */
+export interface UserSetting {
+  id: string;
+  owner?: (string | null) | User;
+  locale?: ('en' | 'vi') | null;
+  modelDefaults?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  imagePreferences?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  videoPreferences?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  audioPreferences?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  uiPreferences?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  providerCredentials?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "media".
  */
 export interface Media {
   id: string;
+  owner?: (string | null) | User;
   alt: string;
+  title?: string | null;
   _h_folders?: (string | null) | Folder;
   _h_tags?: (string | Tag)[] | null;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  source?: ('upload' | 'workflow' | 'studio' | 'derived') | null;
+  sourceWorkflow?: (string | null) | Workflow;
+  sourceExecution?: (string | null) | Execution;
+  sourceGeneration?: (string | null) | StudioGeneration;
+  derivedFrom?: (string | null) | Media;
+  derivedMetadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
   url?: string | null;
@@ -212,14 +441,24 @@ export interface Folder {
   id: string;
   _h_folders?: (string | null) | Folder;
   name: string;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
   _h_slugPath?: string | null;
@@ -233,14 +472,24 @@ export interface Tag {
   id: string;
   _h_tags?: (string | null) | Tag;
   name: string;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
   _h_slugPath?: string | null;
@@ -252,6 +501,7 @@ export interface Tag {
  */
 export interface Workflow {
   id: string;
+  owner?: (string | null) | User;
   name: string;
   description?: string | null;
   category: 'custom' | 'creative' | 'story' | 'video' | 'automation';
@@ -266,14 +516,24 @@ export interface Workflow {
     | number
     | boolean
     | null;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
 }
@@ -283,7 +543,9 @@ export interface Workflow {
  */
 export interface Execution {
   id: string;
-  workflow: string | Workflow;
+  workflow?: (string | null) | Workflow;
+  retryOf?: (string | null) | Execution;
+  owner?: (string | null) | User;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
   scope: string;
   startedAt: string;
@@ -317,14 +579,195 @@ export interface Execution {
     | boolean
     | null;
   error?: string | null;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "studio-generations".
+ */
+export interface StudioGeneration {
+  id: string;
+  owner?: (string | null) | User;
+  modality: 'image' | 'video' | 'audio';
+  status: 'queued' | 'running' | 'pending' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled';
+  prompt?: string | null;
+  provider: string;
+  model: string;
+  inputSnapshot?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  references?: (string | Media)[] | null;
+  outputs?:
+    | (
+        | {
+            relationTo: 'media';
+            value: string | Media;
+          }
+        | {
+            relationTo: 'text-assets';
+            value: string | TextAsset;
+          }
+      )[]
+    | null;
+  providerTaskId?: string | null;
+  lastPolledAt?: string | null;
+  retryOf?: (string | null) | StudioGeneration;
+  errorCode?: string | null;
+  error?: string | null;
+  durationMs?: number | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "text-assets".
+ */
+export interface TextAsset {
+  id: string;
+  owner?: (string | null) | User;
+  title: string;
+  content: string;
+  sizeBytes?: number | null;
+  source?: string | null;
+  sourceId?: string | null;
+  metadata?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "signup-attempts".
+ */
+export interface SignupAttempt {
+  id: string;
+  ipHash: string;
+  count: number;
+  resetAt: string;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "prompts".
+ */
+export interface Prompt {
+  id: string;
+  owner?: (string | null) | User;
+  title: string;
+  description?: string | null;
+  content: string;
+  category?: string | null;
+  tags?:
+    | {
+        tag?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
 }
@@ -357,8 +800,24 @@ export interface PayloadLockedDocument {
         value: string | Admin;
       } | null)
     | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null)
+    | ({
+        relationTo: 'admin-setup';
+        value: string | AdminSetup;
+      } | null)
+    | ({
+        relationTo: 'user-settings';
+        value: string | UserSetting;
+      } | null)
+    | ({
         relationTo: 'media';
         value: string | Media;
+      } | null)
+    | ({
+        relationTo: 'signup-attempts';
+        value: string | SignupAttempt;
       } | null)
     | ({
         relationTo: 'folders';
@@ -375,12 +834,29 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'executions';
         value: string | Execution;
+      } | null)
+    | ({
+        relationTo: 'prompts';
+        value: string | Prompt;
+      } | null)
+    | ({
+        relationTo: 'text-assets';
+        value: string | TextAsset;
+      } | null)
+    | ({
+        relationTo: 'studio-generations';
+        value: string | StudioGeneration;
       } | null);
   globalSlug?: string | null;
-  user: {
-    relationTo: 'admins';
-    value: string | Admin;
-  };
+  user:
+    | {
+        relationTo: 'admins';
+        value: string | Admin;
+      }
+    | {
+        relationTo: 'users';
+        value: string | User;
+      };
   updatedAt: string;
   createdAt: string;
 }
@@ -390,10 +866,15 @@ export interface PayloadLockedDocument {
  */
 export interface PayloadPreference {
   id: string;
-  user: {
-    relationTo: 'admins';
-    value: string | Admin;
-  };
+  user:
+    | {
+        relationTo: 'admins';
+        value: string | Admin;
+      }
+    | {
+        relationTo: 'users';
+        value: string | User;
+      };
   key?: string | null;
   value?:
     | {
@@ -429,14 +910,24 @@ export interface PayloadLlmInstruction {
   entityType: 'collection' | 'global';
   additionalInstructions?: string | null;
   systemInstructions?: string | null;
-  createdBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
-  updatedBy?: {
-    relationTo: 'admins';
-    value: string | Admin;
-  } | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
   updatedAt: string;
   createdAt: string;
 }
@@ -467,12 +958,79 @@ export interface AdminsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users_select".
+ */
+export interface UsersSelect<T extends boolean = true> {
+  name?: T;
+  role?: T;
+  storageQuotaBytes?: T;
+  storageUsedBytes?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  email?: T;
+  resetPasswordToken?: T;
+  resetPasswordExpiration?: T;
+  salt?: T;
+  hash?: T;
+  resetPasswordRequestedAt?: T;
+  loginAttempts?: T;
+  lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "admin-setup_select".
+ */
+export interface AdminSetupSelect<T extends boolean = true> {
+  setupKey?: T;
+  claimedBy?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "user-settings_select".
+ */
+export interface UserSettingsSelect<T extends boolean = true> {
+  owner?: T;
+  locale?: T;
+  modelDefaults?: T;
+  imagePreferences?: T;
+  videoPreferences?: T;
+  audioPreferences?: T;
+  uiPreferences?: T;
+  providerCredentials?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "media_select".
  */
 export interface MediaSelect<T extends boolean = true> {
+  owner?: T;
   alt?: T;
+  title?: T;
   _h_folders?: T;
   _h_tags?: T;
+  source?: T;
+  sourceWorkflow?: T;
+  sourceExecution?: T;
+  sourceGeneration?: T;
+  derivedFrom?: T;
+  derivedMetadata?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -498,6 +1056,19 @@ export interface MediaSelect<T extends boolean = true> {
       };
   focalX?: T;
   focalY?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "signup-attempts_select".
+ */
+export interface SignupAttemptsSelect<T extends boolean = true> {
+  ipHash?: T;
+  count?: T;
+  resetAt?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -532,6 +1103,7 @@ export interface TagsSelect<T extends boolean = true> {
  * via the `definition` "workflows_select".
  */
 export interface WorkflowsSelect<T extends boolean = true> {
+  owner?: T;
   name?: T;
   description?: T;
   category?: T;
@@ -549,6 +1121,8 @@ export interface WorkflowsSelect<T extends boolean = true> {
  */
 export interface ExecutionsSelect<T extends boolean = true> {
   workflow?: T;
+  retryOf?: T;
+  owner?: T;
   status?: T;
   scope?: T;
   startedAt?: T;
@@ -558,6 +1132,69 @@ export interface ExecutionsSelect<T extends boolean = true> {
   nodeRecords?: T;
   logs?: T;
   error?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "prompts_select".
+ */
+export interface PromptsSelect<T extends boolean = true> {
+  owner?: T;
+  title?: T;
+  description?: T;
+  content?: T;
+  category?: T;
+  tags?:
+    | T
+    | {
+        tag?: T;
+        id?: T;
+      };
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "text-assets_select".
+ */
+export interface TextAssetsSelect<T extends boolean = true> {
+  owner?: T;
+  title?: T;
+  content?: T;
+  sizeBytes?: T;
+  source?: T;
+  sourceId?: T;
+  metadata?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "studio-generations_select".
+ */
+export interface StudioGenerationsSelect<T extends boolean = true> {
+  owner?: T;
+  modality?: T;
+  status?: T;
+  prompt?: T;
+  provider?: T;
+  model?: T;
+  inputSnapshot?: T;
+  references?: T;
+  outputs?: T;
+  providerTaskId?: T;
+  lastPolledAt?: T;
+  retryOf?: T;
+  errorCode?: T;
+  error?: T;
+  durationMs?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -646,7 +1283,7 @@ export interface CollectionsWidget {
 export interface CollectionQueryWidget {
   data?: {
     title?: string | null;
-    relatedCollection: 'admins' | 'media' | 'folders' | 'tags' | 'workflows' | 'executions';
+    relatedCollection: 'admins' | 'media' | 'folders' | 'tags' | 'workflows' | 'executions' | 'prompts' | 'text-assets';
     where?:
       | {
           [k: string]: unknown;
@@ -668,7 +1305,8 @@ export interface CollectionQueryWidget {
  */
 export interface ActivityWidget {
   data?: {
-    excludedCollections?: ('admins' | 'media' | 'folders' | 'tags' | 'workflows' | 'executions')[] | null;
+    excludedCollections?:
+      ('admins' | 'media' | 'folders' | 'tags' | 'workflows' | 'executions' | 'prompts' | 'text-assets')[] | null;
   };
   width: 'small' | 'medium' | 'large' | 'x-large' | 'full';
 }

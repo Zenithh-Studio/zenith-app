@@ -155,6 +155,53 @@ describe('node registry', () => {
 })
 
 describe('workflow engine', () => {
+  it('runs group members and their upstream DAG dependencies once', async () => {
+    const definition: WorkflowDefinition = {
+      ...executableDefinition,
+      nodes: [
+        ...executableDefinition.nodes,
+        {
+          id: 'unrelated',
+          type: 'input.text',
+          name: 'Unrelated',
+          position: { x: 0, y: 300 },
+          config: { value: 'Do not run' },
+        },
+      ],
+      groups: [
+        {
+          id: 'group-1',
+          name: 'Preview group',
+          nodeIds: ['preview'],
+          position: { x: 0, y: 0 },
+          width: 800,
+          height: 400,
+        },
+      ],
+    }
+    const result = await runWorkflow(definition, undefined, { targetNodeIds: ['preview'] })
+
+    expect(result.status).toBe('succeeded')
+    expect(result.records.map((record) => record.nodeId)).toEqual(['input', 'template', 'preview'])
+  })
+
+  it('resumes a saved DAG from successful output records without rerunning those nodes', async () => {
+    const result = await runWorkflow(executableDefinition, 'preview', {
+      initialRecords: [
+        {
+          nodeId: 'input',
+          status: 'succeeded',
+          outputs: { prompt: { type: 'text', value: 'Recovered brief.' } },
+        },
+      ],
+    })
+
+    expect(result.status).toBe('succeeded')
+    expect(result.records.map((record) => record.nodeId)).toEqual(['input', 'template', 'preview'])
+    expect(result.records[0].outputs?.prompt.value).toBe('Recovered brief.')
+    expect(result.records[1].outputs?.text.value).toBe('Direction: Recovered brief.')
+  })
+
   beforeEach(() => {
     vi.stubEnv('APP_OPENAI_API_KEY', '')
     vi.stubEnv('APP_MUSE2API_BASE_URL', 'http://muse2api:18610/v1')
@@ -326,6 +373,68 @@ describe('workflow engine', () => {
       'Wait started',
       'Wait completed',
     ])
+  })
+
+  it('cancels the active node, marks pending nodes cancelled, and never persists late outputs', async () => {
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'input',
+          type: 'input.text',
+          name: 'Input',
+          position: { x: 0, y: 0 },
+          config: { value: 'wait' },
+        },
+        {
+          id: 'delay',
+          type: 'utility.delay',
+          name: 'Wait',
+          position: { x: 200, y: 0 },
+          config: { milliseconds: 150 },
+        },
+        {
+          id: 'preview',
+          type: 'output.preview',
+          name: 'Preview',
+          position: { x: 400, y: 0 },
+          config: {},
+        },
+      ],
+      edges: [
+        {
+          id: 'input-delay',
+          source: 'input',
+          sourceHandle: 'text',
+          target: 'delay',
+          targetHandle: 'input',
+        },
+        {
+          id: 'delay-preview',
+          source: 'delay',
+          sourceHandle: 'output',
+          target: 'preview',
+          targetHandle: 'input',
+        },
+      ],
+    }
+    const controller = new AbortController()
+    const persisted: string[] = []
+    const result = await runWorkflow(definition, undefined, {
+      signal: controller.signal,
+      onNodeRecord: async (record) => {
+        if (record.nodeId === 'delay' && record.status === 'running') controller.abort()
+      },
+      persistNodeOutputs: async (node, outputs) => {
+        persisted.push(node.id)
+        return { outputs }
+      },
+    })
+
+    expect(result.status).toBe('cancelled')
+    expect(result.records.find((record) => record.nodeId === 'delay')?.status).toBe('cancelled')
+    expect(result.records.find((record) => record.nodeId === 'preview')?.status).toBe('cancelled')
+    expect(persisted).toEqual(['input'])
   })
 
   it('rejects cycles before executing nodes', async () => {

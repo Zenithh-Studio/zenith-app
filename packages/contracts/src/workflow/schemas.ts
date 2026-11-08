@@ -29,6 +29,26 @@ export const workflowDefinitionSchema = z
           .strict(),
       )
       .max(10_000),
+    groups: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            name: z.string().trim().min(1).max(120),
+            description: z.string().max(1000).optional(),
+            color: z
+              .string()
+              .regex(/^#[0-9a-fA-F]{6}$/)
+              .optional(),
+            collapsed: z.boolean().optional(),
+            nodeIds: z.array(z.string().min(1)),
+            position: z.object({ x: z.number(), y: z.number() }).strict(),
+            width: z.number().positive(),
+            height: z.number().positive(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
   .superRefine((definition, context) => {
@@ -108,6 +128,37 @@ export const workflowDefinitionSchema = z
         })
       }
     })
+
+    const groupIds = new Set<string>()
+    const groupForNode = new Map<string, string>()
+    definition.groups?.forEach((group, groupIndex) => {
+      if (groupIds.has(group.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Duplicate group identifier “${group.id}”.`,
+          path: ['groups', groupIndex, 'id'],
+        })
+      }
+      groupIds.add(group.id)
+      group.nodeIds.forEach((nodeId, memberIndex) => {
+        if (!nodesById.has(nodeId)) {
+          context.addIssue({
+            code: 'custom',
+            message: `Group “${group.name}” references a missing node.`,
+            path: ['groups', groupIndex, 'nodeIds', memberIndex],
+          })
+        }
+        const existingGroupId = groupForNode.get(nodeId)
+        if (existingGroupId) {
+          context.addIssue({
+            code: 'custom',
+            message: 'A node can belong to only one group.',
+            path: ['groups', groupIndex, 'nodeIds', memberIndex],
+          })
+        }
+        groupForNode.set(nodeId, group.id)
+      })
+    })
   })
 
 export const createWorkflowRequestSchema = z
@@ -130,8 +181,26 @@ export const updateWorkflowRequestSchema = z
 export const executeWorkflowRequestSchema = z
   .object({
     targetNodeId: z.string().min(1).optional(),
+    groupId: z.string().min(1).optional(),
+    retryOfExecutionId: z.string().min(1).optional(),
   })
   .strict()
+  .superRefine((request, context) => {
+    if (request.targetNodeId && request.groupId) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Run a node or a group, not both.',
+        path: ['groupId'],
+      })
+    }
+    if (request.retryOfExecutionId && !request.targetNodeId) {
+      context.addIssue({
+        code: 'custom',
+        message: 'A retry must target the failed node.',
+        path: ['targetNodeId'],
+      })
+    }
+  })
 
 export type CreateWorkflowRequest = z.infer<typeof createWorkflowRequestSchema>
 export type UpdateWorkflowRequest = z.infer<typeof updateWorkflowRequestSchema>

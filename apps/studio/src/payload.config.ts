@@ -4,7 +4,21 @@ import { mcpPlugin } from '@payloadcms/plugin-mcp'
 import { en as adminLanguage } from '@payloadcms/translations/languages/en'
 import { buildConfig } from 'payload'
 import { fileURLToPath } from 'url'
-import { Admins, Executions, Folders, Media, Tags, Workflows } from '@/server/collections'
+import {
+  AdminSetup,
+  Admins,
+  Executions,
+  Folders,
+  Media,
+  Prompts,
+  SignupAttempts,
+  StudioGenerations,
+  Tags,
+  TextAssets,
+  UserSettings,
+  Users,
+  Workflows,
+} from '@/server/collections'
 import { migrations } from './migrations'
 
 const filename = fileURLToPath(import.meta.url)
@@ -36,7 +50,21 @@ export default buildConfig({
     fallbackLanguage: 'en',
     supportedLanguages: { en: adminLanguage },
   },
-  collections: [Admins, Media, Folders, Tags, Workflows, Executions],
+  collections: [
+    Admins,
+    Users,
+    AdminSetup,
+    UserSettings,
+    Media,
+    SignupAttempts,
+    Folders,
+    Tags,
+    Workflows,
+    Executions,
+    Prompts,
+    TextAssets,
+    StudioGenerations,
+  ],
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),
   },

@@ -23,8 +23,9 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { createPortal } from 'react-dom'
 import { workflowTemplates } from '@znith/contracts'
 import type { WorkflowDocument } from '@znith/contracts'
-import { formatDate, slugify } from '@znith/utils'
-import { Sidebar, Brand } from './AppChrome'
+import { slugify } from '@znith/utils'
+import { Sidebar } from './AppChrome'
+import { formatLocaleDate, useLocale } from '../../../shared/i18n/LocaleProvider'
 
 const templateTones: Record<string, string> = {
   blank: 'bg-zinc-100 text-zinc-700',
@@ -41,14 +42,15 @@ const templates = Object.entries(workflowTemplates).map(([templateId, template])
 }))
 
 function Status({ value }: { value: string }) {
+  const { t } = useLocale()
   const config =
     value === 'succeeded'
-      ? { icon: Check, label: 'Succeeded', className: 'bg-emerald-50 text-emerald-700' }
+      ? { icon: Check, label: t('Succeeded'), className: 'bg-emerald-50 text-emerald-700' }
       : value === 'failed'
-        ? { icon: CircleAlert, label: 'Failed', className: 'bg-rose-50 text-rose-700' }
+        ? { icon: CircleAlert, label: t('Failed'), className: 'bg-rose-50 text-rose-700' }
         : value === 'running'
-          ? { icon: LoaderCircle, label: 'Running', className: 'bg-violet-50 text-violet-700' }
-          : { icon: Clock3, label: 'Idle', className: 'bg-zinc-100 text-zinc-600' }
+          ? { icon: LoaderCircle, label: t('Running'), className: 'bg-violet-50 text-violet-700' }
+          : { icon: Clock3, label: t('Idle'), className: 'bg-zinc-100 text-zinc-600' }
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${config.className}`}
@@ -59,6 +61,7 @@ function Status({ value }: { value: string }) {
 }
 
 export function WorkflowDashboard() {
+  const { locale, t } = useLocale()
   const router = useRouter()
   const [workflows, setWorkflows] = useState<WorkflowDocument[]>([])
   const [loading, setLoading] = useState(true)
@@ -84,12 +87,21 @@ export function WorkflowDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const response = await fetch(`/api/studio/workflows?search=${encodeURIComponent(search)}`)
-    const responseBody = await response.json()
-    if (!response.ok) setError(responseBody.error || 'Could not load workflows.')
-    else setWorkflows(responseBody.docs)
-    setLoading(false)
-  }, [search])
+    setError('')
+    try {
+      const response = await fetch(`/api/studio/workflows?search=${encodeURIComponent(search)}`)
+      const responseBody = (await response.json()) as {
+        docs?: WorkflowDocument[]
+        error?: string
+      }
+      if (!response.ok) throw new Error(responseBody.error || 'Could not load workflows.')
+      setWorkflows(responseBody.docs || [])
+    } catch (loadError) {
+      setError(t(loadError instanceof Error ? loadError.message : 'Could not load workflows.'))
+    } finally {
+      setLoading(false)
+    }
+  }, [search, t])
 
   useEffect(() => {
     const timeout = setTimeout(load, 200)
@@ -153,19 +165,21 @@ export function WorkflowDashboard() {
       body: JSON.stringify({ templateId }),
     })
     const responseBody = await response.json()
-    if (!response.ok) return setError(responseBody.error || 'Could not create workflow.')
+    if (!response.ok) return setError(t(responseBody.error || 'Could not create workflow.'))
     router.push(`/workflows/${responseBody.workflow.id}`)
   }
 
   const remove = async (workflow: WorkflowDocument) => {
     if (
       !window.confirm(
-        `Delete “${workflow.name}”? Execution history for this workflow will no longer be accessible.`,
+        t('Delete “{name}”? Execution history for this workflow will no longer be accessible.', {
+          name: workflow.name,
+        }),
       )
     )
       return
     const response = await fetch(`/api/studio/workflows/${workflow.id}`, { method: 'DELETE' })
-    if (!response.ok) return setError('Could not delete workflow.')
+    if (!response.ok) return setError(t('Could not delete workflow.'))
     setWorkflows((current) => current.filter((item) => item.id !== workflow.id))
   }
 
@@ -180,7 +194,7 @@ export function WorkflowDashboard() {
         definition: workflow.definition,
       }),
     })
-    if (!response.ok) return setError('Could not duplicate workflow.')
+    if (!response.ok) return setError(t('Could not duplicate workflow.'))
     await load()
   }
 
@@ -188,12 +202,29 @@ export function WorkflowDashboard() {
     setWorkflows((current) =>
       current.map((item) => (item.id === workflow.id ? { ...item, status: 'running' } : item)),
     )
-    await fetch(`/api/studio/workflows/${workflow.id}/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    })
-    await load()
+    try {
+      const response = await fetch(`/api/studio/workflows/${workflow.id}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error || 'Workflow execution could not be started.')
+      }
+      await load()
+    } catch (runError) {
+      setWorkflows((current) =>
+        current.map((item) =>
+          item.id === workflow.id ? { ...item, status: workflow.status } : item,
+        ),
+      )
+      setError(
+        t(
+          runError instanceof Error ? runError.message : 'Workflow execution could not be started.',
+        ),
+      )
+    }
   }
 
   const exportWorkflow = (workflow: WorkflowDocument) => {
@@ -221,35 +252,32 @@ export function WorkflowDashboard() {
           definition: imported.definition,
         }),
       })
-      if (!response.ok) throw new Error()
+      if (!response.ok) throw new Error('The selected file is not a valid Znith workflow export.')
       await load()
-    } catch {
-      setError('The selected file is not a valid Znith workflow export.')
+    } catch (error) {
+      setError(
+        t(
+          error instanceof Error
+            ? error.message
+            : 'The selected file is not a valid Znith workflow export.',
+        ),
+      )
     }
   }
 
   return (
-    <main className="flex min-h-screen bg-[#f7f7f8] text-zinc-950">
-      <Sidebar />
+    <main className="flex min-h-screen flex-col bg-[#f7f7f8] text-zinc-950 lg:flex-row">
+      <Sidebar active="workflows" />
       <section className="min-w-0 flex-1">
-        <header className="flex h-16 items-center justify-between border-b border-zinc-200/80 bg-white px-5 lg:hidden">
-          <Brand />
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="grid size-9 place-items-center rounded-xl bg-violet-600 text-white"
-          >
-            <Plus size={18} />
-          </button>
-        </header>
         <div className="mx-auto max-w-[1480px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">
-                Workspace
+                {t('Workspace')}
               </p>
-              <h1 className="text-3xl font-semibold tracking-[-0.035em]">Workflows</h1>
+              <h1 className="text-3xl font-semibold tracking-[-0.035em]">{t('Workflows')}</h1>
               <p className="mt-2 text-sm text-zinc-500">
-                Build, run, and monitor your AI production systems.
+                {t('Build, run, and monitor your AI production systems.')}
               </p>
             </div>
             <div className="relative">
@@ -257,12 +285,12 @@ export function WorkflowDashboard() {
                 onClick={() => setCreateOpen(!createOpen)}
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700"
               >
-                <Plus size={16} /> Create workflow
+                <Plus size={16} /> {t('Create workflow')}
               </button>
               {createOpen && (
                 <div className="absolute right-0 top-12 z-30 w-80 rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl shadow-zinc-200/60">
                   <div className="px-3 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                    Choose a starting point
+                    {t('Choose a starting point')}
                   </div>
                   {templates.map((template) => (
                     <button
@@ -276,8 +304,8 @@ export function WorkflowDashboard() {
                         <Sparkles size={16} />
                       </span>
                       <span>
-                        <span className="block text-sm font-medium">{template.name}</span>
-                        <span className="text-xs text-zinc-500">{template.detail}</span>
+                        <span className="block text-sm font-medium">{t(template.name)}</span>
+                        <span className="text-xs text-zinc-500">{t(template.detail)}</span>
                       </span>
                     </button>
                   ))}
@@ -303,7 +331,7 @@ export function WorkflowDashboard() {
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search workflows"
+                  placeholder={t('Search workflows')}
                   className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
                 />
               </div>
@@ -321,20 +349,21 @@ export function WorkflowDashboard() {
                   onClick={() => fileRef.current?.click()}
                   className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
                 >
-                  <FileUp size={14} /> Import
+                  <FileUp size={14} /> {t('Import')}
                 </button>
                 <button
                   onClick={() => setNewestFirst((value) => !value)}
                   className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
                 >
-                  <ArrowDownUp size={14} /> Updated {newestFirst ? 'newest' : 'oldest'}
+                  <ArrowDownUp size={14} /> {t(newestFirst ? 'Updated newest' : 'Updated oldest')}
                 </button>
               </div>
             </div>
 
             {loading ? (
               <div className="grid h-72 place-items-center text-sm text-zinc-500">
-                <LoaderCircle className="mr-2 inline animate-spin" size={18} /> Loading workflows
+                <LoaderCircle className="mr-2 inline animate-spin" size={18} />{' '}
+                {t('Loading workflows')}
               </div>
             ) : workflows.length === 0 ? (
               <div className="grid min-h-80 place-items-center p-8 text-center">
@@ -342,15 +371,15 @@ export function WorkflowDashboard() {
                   <span className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-violet-50 text-violet-600">
                     <WorkflowIcon size={22} />
                   </span>
-                  <h2 className="font-semibold">No workflows yet</h2>
+                  <h2 className="font-semibold">{t('No workflows yet')}</h2>
                   <p className="mt-1 max-w-sm text-sm text-zinc-500">
-                    Create a blank canvas or start with a production-ready template.
+                    {t('Create a blank canvas or start with a production-ready template.')}
                   </p>
                   <button
                     onClick={() => setCreateOpen(true)}
                     className="mt-5 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white"
                   >
-                    Create your first workflow
+                    {t('Create your first workflow')}
                   </button>
                 </div>
               </div>
@@ -359,12 +388,12 @@ export function WorkflowDashboard() {
                 <table className="w-full min-w-[800px] table-fixed text-left text-sm">
                   <thead className="bg-zinc-50/80 text-xs font-medium text-zinc-500">
                     <tr>
-                      <th className="w-[26%] px-5 py-3.5">Workflow</th>
-                      <th className="w-[13%] px-4 py-3.5">Category</th>
-                      <th className="w-[8%] px-4 py-3.5">Nodes</th>
-                      <th className="w-[16%] px-4 py-3.5">Last execution</th>
-                      <th className="w-[12%] px-4 py-3.5">Status</th>
-                      <th className="w-[17%] px-4 py-3.5">Updated</th>
+                      <th className="w-[26%] px-5 py-3.5">{t('Workflow')}</th>
+                      <th className="w-[13%] px-4 py-3.5">{t('Category')}</th>
+                      <th className="w-[8%] px-4 py-3.5">{t('Nodes')}</th>
+                      <th className="w-[16%] px-4 py-3.5">{t('Last execution')}</th>
+                      <th className="w-[12%] px-4 py-3.5">{t('Status')}</th>
+                      <th className="w-[17%] px-4 py-3.5">{t('Updated')}</th>
                       <th className="w-[8%] px-2 py-3.5" />
                     </tr>
                   </thead>
@@ -377,7 +406,7 @@ export function WorkflowDashboard() {
                               {workflow.name}
                             </span>
                             <span className="mt-1 block max-w-xs truncate text-xs text-zinc-500">
-                              {workflow.description || 'No description'}
+                              {workflow.description || t('No description')}
                             </span>
                           </Link>
                         </td>
@@ -386,13 +415,13 @@ export function WorkflowDashboard() {
                           {workflow.definition.nodes?.length ?? 0}
                         </td>
                         <td className="px-4 py-4 text-zinc-500">
-                          {formatDate(workflow.lastExecutionAt)}
+                          {formatLocaleDate(workflow.lastExecutionAt, locale)}
                         </td>
                         <td className="px-4 py-4">
                           <Status value={workflow.status} />
                         </td>
                         <td className="px-4 py-4 text-zinc-500">
-                          {formatDate(workflow.updatedAt)}
+                          {formatLocaleDate(workflow.updatedAt, locale)}
                         </td>
                         <td className="px-2 py-4 text-right">
                           <button
@@ -400,7 +429,7 @@ export function WorkflowDashboard() {
                               activeMenu?.workflowId === workflow.id ? menuTriggerRef : undefined
                             }
                             onClick={(event) => toggleWorkflowMenu(event, workflow.id)}
-                            aria-label={`Actions for ${workflow.name}`}
+                            aria-label={t('Actions for {name}', { name: workflow.name })}
                             aria-haspopup="true"
                             aria-expanded={activeMenu?.workflowId === workflow.id}
                             className="ml-auto grid size-8 place-items-center rounded-lg text-zinc-400 hover:bg-white hover:text-zinc-700"
@@ -422,7 +451,7 @@ export function WorkflowDashboard() {
             <div
               ref={menuPanelRef}
               role="group"
-              aria-label="Workflow actions"
+              aria-label={t('Workflow actions')}
               style={{ left: activeMenu.left, top: activeMenu.top }}
               className="fixed z-[100] w-44 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl shadow-zinc-900/10"
             >
@@ -433,7 +462,7 @@ export function WorkflowDashboard() {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
               >
-                <Play size={14} /> Run workflow
+                <Play size={14} /> {t('Run workflow')}
               </button>
               <button
                 onClick={() => {
@@ -442,7 +471,7 @@ export function WorkflowDashboard() {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
               >
-                <Copy size={14} /> Duplicate
+                <Copy size={14} /> {t('Duplicate')}
               </button>
               <button
                 onClick={() => {
@@ -451,7 +480,7 @@ export function WorkflowDashboard() {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-zinc-50"
               >
-                <Download size={14} /> Export JSON
+                <Download size={14} /> {t('Export JSON')}
               </button>
               <button
                 onClick={() => {
@@ -460,7 +489,7 @@ export function WorkflowDashboard() {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-rose-600 hover:bg-rose-50"
               >
-                <Trash2 size={14} /> Delete
+                <Trash2 size={14} /> {t('Delete')}
               </button>
             </div>,
             document.body,

@@ -2,13 +2,16 @@ import { updateWorkflowRequestSchema } from '@znith/contracts'
 import { getWorkflowService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
 import { withContextApiLogging } from '@/lib/server-logger'
+import { getAppSession, unauthenticatedResponse } from '@/lib/app-auth'
 
 type WorkflowRouteContext = { params: Promise<{ id: string }> }
 
 async function getWorkflow(_request: Request, context: WorkflowRouteContext) {
+  const session = await getAppSession(_request.headers)
+  if (!session) return unauthenticatedResponse()
   const { id } = await context.params
   try {
-    const workflowService = await getWorkflowService()
+    const workflowService = await getWorkflowService(session.user)
     const { workflow, executions } = await workflowService.getWorkflow(id)
     if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json({ workflow, executions })
@@ -18,6 +21,8 @@ async function getWorkflow(_request: Request, context: WorkflowRouteContext) {
 }
 
 async function updateWorkflow(request: Request, context: WorkflowRouteContext) {
+  const session = await getAppSession(request.headers)
+  if (!session) return unauthenticatedResponse()
   const { id } = await context.params
   let requestBody: unknown
   try {
@@ -35,7 +40,7 @@ async function updateWorkflow(request: Request, context: WorkflowRouteContext) {
   }
 
   try {
-    const workflowService = await getWorkflowService()
+    const workflowService = await getWorkflowService(session.user)
     const workflow = await workflowService.updateWorkflow(id, parsedRequest.data)
     if (!workflow) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return Response.json({ workflow })
@@ -45,9 +50,11 @@ async function updateWorkflow(request: Request, context: WorkflowRouteContext) {
 }
 
 async function deleteWorkflow(_request: Request, context: WorkflowRouteContext) {
+  const session = await getAppSession(_request.headers)
+  if (!session) return unauthenticatedResponse()
   const { id } = await context.params
   try {
-    const workflowService = await getWorkflowService()
+    const workflowService = await getWorkflowService(session.user)
     const deleted = await workflowService.deleteWorkflow(id)
     if (!deleted) return Response.json({ error: 'Workflow not found.' }, { status: 404 })
     return new Response(null, { status: 204 })

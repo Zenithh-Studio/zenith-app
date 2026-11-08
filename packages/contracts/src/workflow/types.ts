@@ -37,10 +37,23 @@ export interface WorkflowEdge {
   targetHandle: string
 }
 
+export interface WorkflowGroup {
+  id: string
+  name: string
+  description?: string
+  color?: string
+  collapsed?: boolean
+  nodeIds: string[]
+  position: { x: number; y: number }
+  width: number
+  height: number
+}
+
 export interface WorkflowDefinition {
   version: 1
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  groups?: WorkflowGroup[]
 }
 
 export interface NodeValue<T = unknown> {
@@ -58,6 +71,12 @@ export interface NodeExecutionRecord {
   durationMs?: number
   outputs?: Record<string, NodeValue>
   error?: string
+  providerTask?: {
+    provider: string
+    model: string
+    taskId: string
+    lastPolledAt?: string
+  }
 }
 
 export interface WorkflowDocument {
@@ -80,7 +99,7 @@ export interface ExecutionLog {
 }
 
 export interface WorkflowRunResult {
-  status: 'succeeded' | 'failed'
+  status: 'succeeded' | 'failed' | 'cancelled'
   records: NodeExecutionRecord[]
   logs: ExecutionLog[]
   error?: string
@@ -88,7 +107,8 @@ export interface WorkflowRunResult {
 
 export interface ExecutionDocument {
   id: string
-  workflow: string | WorkflowDocument
+  workflow?: string | WorkflowDocument | null
+  retryOf?: string | null
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
   scope: string
   startedAt: string
@@ -109,6 +129,8 @@ export interface AssetDocument {
   mimeType?: string | null
   filesize?: number | null
   alt: string
+  source?: 'upload' | 'workflow' | 'studio' | 'derived' | null
+  sourceExecution?: string | { id: string } | null
   createdAt: string
 }
 

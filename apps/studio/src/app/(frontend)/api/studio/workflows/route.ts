@@ -2,11 +2,14 @@ import { createWorkflowRequestSchema } from '@znith/contracts'
 import { getWorkflowService } from '@/lib/backend-services'
 import { backendUnavailableResponse } from '@/lib/backend-api-response'
 import { withApiLogging } from '@/lib/server-logger'
+import { getAppSession, unauthenticatedResponse } from '@/lib/app-auth'
 
 async function listWorkflows(request: Request) {
+  const session = await getAppSession(request.headers)
+  if (!session) return unauthenticatedResponse()
   const search = new URL(request.url).searchParams.get('search') ?? undefined
   try {
-    const workflowService = await getWorkflowService()
+    const workflowService = await getWorkflowService(session.user)
     const workflows = await workflowService.listWorkflows(search)
     return Response.json({ docs: workflows })
   } catch (error) {
@@ -15,6 +18,8 @@ async function listWorkflows(request: Request) {
 }
 
 async function createWorkflow(request: Request) {
+  const session = await getAppSession(request.headers)
+  if (!session) return unauthenticatedResponse()
   let requestBody: unknown
   try {
     requestBody = await request.json()
@@ -31,7 +36,7 @@ async function createWorkflow(request: Request) {
   }
 
   try {
-    const workflowService = await getWorkflowService()
+    const workflowService = await getWorkflowService(session.user)
     const workflow = await workflowService.createWorkflow(parsedRequest.data)
     return Response.json({ workflow }, { status: 201 })
   } catch (error) {
