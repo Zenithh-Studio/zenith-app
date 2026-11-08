@@ -152,7 +152,18 @@ export class AssetService {
     if (!input.file.name.trim()) {
       throw new AssetValidationError('The uploaded file must have a name.', 400)
     }
-    const mimeType = input.file.mimetype.split(';', 1)[0]?.trim().toLowerCase()
+    const reportedMimeType = input.file.mimetype.split(';', 1)[0]?.trim().toLowerCase()
+    const mimeType =
+      /\.m4a$/i.test(input.file.name) &&
+      [
+        'audio/mp4',
+        'audio/x-m4a',
+        'audio/m4a',
+        'application/x-m4a',
+        'application/octet-stream',
+      ].includes(reportedMimeType)
+        ? 'audio/mp4'
+        : reportedMimeType
     if (!allowedMimePrefixes.some((prefix) => mimeType.startsWith(prefix))) {
       throw new AssetValidationError('This media type is not supported.', 415)
     }
