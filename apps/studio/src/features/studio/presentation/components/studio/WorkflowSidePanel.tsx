@@ -13,8 +13,6 @@ import {
   Search,
   Video,
 } from 'lucide-react'
-import { paletteNodeRegistry } from '@znith/contracts'
-import type { NodeDefinition } from '@znith/contracts'
 import { formatLocaleBytes, useLocale } from '../../../shared/i18n/LocaleProvider'
 
 type WorkflowAsset = {
@@ -64,7 +62,6 @@ export function WorkflowSidePanel({
   onClose,
   searchNodes,
   onSearchNodes,
-  onAddNode,
   onInsertAsset,
   onInsertPrompt,
   canvasNodes,
@@ -75,7 +72,6 @@ export function WorkflowSidePanel({
   onClose: () => void
   searchNodes: string
   onSearchNodes: (value: string) => void
-  onAddNode: (nodeType: string) => void
   onInsertAsset: (asset: WorkflowAsset) => void
   onInsertPrompt: (prompt: WorkflowPrompt) => void
   canvasNodes: CanvasListNode[]
@@ -148,14 +144,13 @@ export function WorkflowSidePanel({
     }
   }, [reloadKey, search, tab])
 
-  const definitions = paletteNodeRegistry.filter((item) =>
-    `${item.displayName} ${item.category} ${item.description}`
-      .toLowerCase()
-      .includes(searchNodes.toLowerCase()),
+  const filteredCanvasNodes = canvasNodes.filter((node) =>
+    `${node.name} ${node.type}`.toLowerCase().includes(searchNodes.toLowerCase()),
   )
+  const matchingNodeIds = new Set(filteredCanvasNodes.map((node) => node.id))
 
   const tabs: Array<{ id: PanelTab; label: string; Icon: typeof Boxes }> = [
-    { id: 'elements', label: t('Canvas Elements'), Icon: Boxes },
+    { id: 'elements', label: t('Nodes'), Icon: Boxes },
     { id: 'assets', label: t('Assets'), Icon: FileImage },
     { id: 'prompts', label: t('Prompts'), Icon: BookOpenText },
   ]
@@ -250,15 +245,7 @@ export function WorkflowSidePanel({
                 .filter(
                   (group) =>
                     group.name.toLowerCase().includes(searchNodes.toLowerCase()) ||
-                    group.nodeIds.some((nodeId) => {
-                      const node = canvasNodes.find((item) => item.id === nodeId)
-                      return Boolean(
-                        node &&
-                        `${node.name} ${node.type}`
-                          .toLowerCase()
-                          .includes(searchNodes.toLowerCase()),
-                      )
-                    }),
+                    group.nodeIds.some((nodeId) => matchingNodeIds.has(nodeId)),
                 )
                 .map((group) => (
                   <details key={group.id} className="group mb-1 rounded-xl border border-zinc-100">
@@ -302,12 +289,8 @@ export function WorkflowSidePanel({
                   </details>
                 ))}
               <div className="space-y-0.5">
-                {canvasNodes
-                  .filter(
-                    (node) =>
-                      !node.groupId &&
-                      `${node.name} ${node.type}`.toLowerCase().includes(searchNodes.toLowerCase()),
-                  )
+                {filteredCanvasNodes
+                  .filter((node) => !node.groupId)
                   .map((node) => (
                     <button
                       key={node.id}
@@ -320,29 +303,12 @@ export function WorkflowSidePanel({
                     </button>
                   ))}
               </div>
-              {!canvasNodes.length && <EmptyPanel>{t('No nodes on this canvas.')}</EmptyPanel>}
+              {!filteredCanvasNodes.length && (
+                <EmptyPanel>
+                  {canvasNodes.length ? t('No matching nodes.') : t('No nodes on this canvas.')}
+                </EmptyPanel>
+              )}
             </section>
-            {['Input', 'AI', 'Processing', 'Output', 'Utility'].map((category) => {
-              const items = definitions.filter((item) => item.category === category)
-              if (!items.length) return null
-              return (
-                <section key={category}>
-                  <h2 className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
-                    {t(category)}
-                  </h2>
-                  <div className="space-y-1">
-                    {items.map((definition) => (
-                      <ElementRow
-                        key={definition.type}
-                        definition={definition}
-                        onAdd={() => onAddNode(definition.type)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )
-            })}
-            {!definitions.length && <EmptyPanel>{t('No matching nodes.')}</EmptyPanel>}
           </div>
         )}
         {tab === 'assets' && (
@@ -419,40 +385,12 @@ export function WorkflowSidePanel({
       </div>
       <div className="border-t border-zinc-100 px-3 py-2 text-[10px] text-zinc-400">
         {tab === 'elements'
-          ? `${definitions.length} ${t('node types')}`
+          ? `${canvasNodes.length} ${t('nodes')}`
           : tab === 'assets'
             ? `${assets.length} ${t('assets')}`
             : `${prompts.length} ${t('prompts')}`}
       </div>
     </aside>
-  )
-}
-
-function ElementRow({ definition, onAdd }: { definition: NodeDefinition; onAdd: () => void }) {
-  const { t } = useLocale()
-  return (
-    <button
-      type="button"
-      disabled={!definition.available}
-      onClick={onAdd}
-      title={definition.available ? definition.description : definition.unavailableReason}
-      className="group flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-45"
-    >
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-700">
-        <Boxes size={14} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium text-zinc-700">
-          {t(definition.displayName)}
-        </span>
-        <span className="block truncate text-[10px] text-zinc-400">
-          {definition.available
-            ? t(definition.description)
-            : t(definition.unavailableReason || 'Unavailable')}
-        </span>
-      </span>
-      <span className="text-zinc-300 group-hover:text-violet-500">+</span>
-    </button>
   )
 }
 

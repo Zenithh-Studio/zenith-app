@@ -44,6 +44,7 @@ export function ImageUtilitiesDialog({
   assetId,
   assetName,
   imageURL,
+  initialAction = 'crop',
   onClose,
   onCreated,
   onInsertText,
@@ -51,12 +52,13 @@ export function ImageUtilitiesDialog({
   assetId: string
   assetName: string
   imageURL: string
+  initialAction?: ImageToolAction
   onClose: () => void
   onCreated: (action: ImageToolAction, assets: DerivedImageAsset[]) => void
   onInsertText: (content: string, sourceAssetId: string) => void
 }) {
   const { t } = useLocale()
-  const [action, setAction] = useState<ImageToolAction>('crop')
+  const [action, setAction] = useState<ImageToolAction>(initialAction)
   const [crop, setCrop] = useState<CropRegion | null>(null)
   const [columns, setColumns] = useState(2)
   const [rows, setRows] = useState(2)

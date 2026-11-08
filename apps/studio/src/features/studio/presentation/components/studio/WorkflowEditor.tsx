@@ -29,6 +29,7 @@ import {
 import {
   ArrowLeft,
   AudioLines,
+  Brush,
   Braces,
   Check,
   ChevronDown,
@@ -70,6 +71,7 @@ import {
   Upload,
   Video,
   VolumeX,
+  ZoomIn,
   X,
   Zap,
 } from 'lucide-react'
@@ -109,7 +111,15 @@ import type {
   WorkflowGroup,
   WorkflowNode,
 } from '@znith/contracts'
-import { cloneValue } from '@znith/utils'
+import {
+  cloneValue,
+  imageAspectRatios,
+  imageCountQuickOptions,
+  imageResolutionOptions,
+  imageSizeFromSettings,
+  normalizeImageCount,
+  readImageDimensions,
+} from '@znith/utils'
 import { Brand } from './AppChrome'
 import { WorkflowSidePanel } from './WorkflowSidePanel'
 import {
@@ -240,6 +250,7 @@ type NodeActionContextValue = {
   selectMediaVersion: (nodeId: string, output: import('@znith/contracts').NodeValue) => void
   addDerivedImages: (nodeId: string, action: ImageToolAction, assets: DerivedImageAsset[]) => void
   addTextNode: (content: string, sourceAssetId?: string) => void
+  addReferenceInput: (targetNodeId: string, targetPortId: string) => void
   updateGroup: (groupId: string, patch: Partial<WorkflowGroup>) => void
   ungroup: (groupId: string) => void
   runGroup: (groupId: string) => void
@@ -257,7 +268,7 @@ type TextNodeEditorContextValue = {
 
 const TextNodeEditorContext = createContext<TextNodeEditorContextValue | null>(null)
 
-const imageAspectRatios = ['9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9']
+const canvasImageAspectRatios = ['9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9']
 
 const iconByType: Record<string, typeof FileText> = {
   'input.text': FileText,
@@ -305,6 +316,7 @@ const portTone = {
   text: { icon: Type, className: '!bg-violet-600' },
   image: { icon: ImageIcon, className: '!bg-blue-500' },
   video: { icon: Video, className: '!bg-fuchsia-500' },
+  audio: { icon: AudioLines, className: '!bg-emerald-600' },
   json: { icon: Braces, className: '!bg-amber-500' },
 } as const
 
@@ -383,7 +395,7 @@ function mediaSource(value: unknown, assetId?: unknown, fileName?: unknown) {
 
 function imageRatioLabel(width: number, height: number) {
   const actualRatio = width / height
-  const matchingPreset = imageAspectRatios.find((ratio) => {
+  const matchingPreset = canvasImageAspectRatios.find((ratio) => {
     const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
     const presetRatio = ratioWidth / ratioHeight
     return Math.abs(actualRatio - presetRatio) <= presetRatio * 0.01
@@ -647,6 +659,7 @@ function NodeActionToolbar({
   onToolbarPointerLeave,
   aspectRatioValue,
   videoRef,
+  onOpenPreview,
 }: {
   workflowNode: WorkflowNode
   record?: NodeExecutionRecord
@@ -657,6 +670,7 @@ function NodeActionToolbar({
   onToolbarPointerLeave: () => void
   aspectRatioValue?: string
   videoRef?: { current: HTMLVideoElement | null }
+  onOpenPreview?: () => void
 }) {
   const { t } = useLocale()
   const actions = useContext(NodeActionContext)
@@ -664,6 +678,7 @@ function NodeActionToolbar({
   const [checkingTask, setCheckingTask] = useState(false)
   const [savingOutput, setSavingOutput] = useState(false)
   const [imageToolsOpen, setImageToolsOpen] = useState(false)
+  const [activeImageTool, setActiveImageTool] = useState<ImageToolAction>('crop')
   const [frameMode, setFrameMode] = useState<'first' | 'current' | 'last'>('current')
   const [capturingFrame, setCapturingFrame] = useState(false)
   const [frameMessage, setFrameMessage] = useState('')
@@ -751,6 +766,16 @@ function NodeActionToolbar({
   const outputText = typeof textOutput?.value === 'string' ? textOutput.value : ''
   const isAI = nodeCapabilities?.generator === true
   const isVideoGenerator = isAI && nodeCapabilities?.modality === 'video'
+  const referenceInputPorts = [
+    'ai.generate-image',
+    'ai.edit-image',
+    'ai.generate-video',
+    'ai.image-to-video',
+  ].includes(type)
+    ? (registryByType
+        .get(type)
+        ?.inputs.filter((port) => ['image', 'video', 'audio'].includes(port.dataType)) ?? [])
+    : []
   const isVideoTaskPending = Boolean(
     isVideoGenerator &&
     record?.providerTask?.taskId &&
@@ -787,6 +812,10 @@ function NodeActionToolbar({
   })
   const saveOutputAction = registeredActions.find((item) => item.id === 'save-to-assets')
   const imageToolsAction = registeredActions.find((item) => item.id === 'image-tools')
+  const openImageTool = (action: ImageToolAction) => {
+    setActiveImageTool(action)
+    setImageToolsOpen(true)
+  }
   const replaceInputAction = registeredActions.find((item) => item.id === 'replace-input')
   const copyPromptAction = registeredActions.find((item) => item.id === 'copy-prompt')
   const generateImageFromTextAction = registeredActions.find(
@@ -1313,6 +1342,64 @@ function NodeActionToolbar({
               {showActionLabels && <span className="text-[9px]">Prompt</span>}
             </button>
           ) : null}
+          {output?.type === 'image' ? (
+            <>
+              {!hiddenQuickActions.includes('mask-edit') ? (
+                <button
+                  type="button"
+                  title={t('Paint a Mask')}
+                  aria-label={t('Paint a Mask')}
+                  disabled={imageToolsAction?.disabled}
+                  onClick={() => openImageTool('mask-edit')}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Brush size={14} />
+                  {showActionLabels && <span className="text-[9px]">{t('Paint a Mask')}</span>}
+                </button>
+              ) : null}
+              {!hiddenQuickActions.includes('crop') ? (
+                <button
+                  type="button"
+                  title={t('Crop image')}
+                  aria-label={t('Crop image')}
+                  disabled={imageToolsAction?.disabled}
+                  onClick={() => openImageTool('crop')}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Crop size={14} />
+                  {showActionLabels && <span className="text-[9px]">{t('Crop image')}</span>}
+                </button>
+              ) : null}
+              {!hiddenQuickActions.includes('upscale') ? (
+                <button
+                  type="button"
+                  title={t('Increase image resolution')}
+                  aria-label={t('Increase image resolution')}
+                  disabled={imageToolsAction?.disabled}
+                  onClick={() => openImageTool('upscale')}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <ZoomIn size={14} />
+                  {showActionLabels && (
+                    <span className="text-[9px]">{t('Increase resolution')}</span>
+                  )}
+                </button>
+              ) : null}
+              {!hiddenQuickActions.includes('image-detail') ? (
+                <button
+                  type="button"
+                  title={t('View image detail')}
+                  aria-label={t('View image detail')}
+                  disabled={!downloadURL || !onOpenPreview}
+                  onClick={() => onOpenPreview?.()}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Maximize2 size={14} />
+                  {showActionLabels && <span className="text-[9px]">{t('View detail')}</span>}
+                </button>
+              ) : null}
+            </>
+          ) : null}
           {copyPromptAction && ['input.text', 'input.prompt'].includes(type) ? (
             <button
               type="button"
@@ -1481,6 +1568,35 @@ function NodeActionToolbar({
                     setMoreOpen(false)
                   }}
                 />
+                {referenceInputPorts.length ? (
+                  <>
+                    <div className="my-1.5 border-t border-zinc-100" />
+                    <p className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                      {t('Add reference input')}
+                    </p>
+                    {referenceInputPorts.map((port) => (
+                      <MenuItem
+                        key={port.id}
+                        icon={
+                          port.dataType === 'image'
+                            ? ImageIcon
+                            : port.dataType === 'video'
+                              ? Video
+                              : AudioLines
+                        }
+                        label={
+                          port.dataType === 'audio'
+                            ? t('Voice input')
+                            : t('{name} input', { name: port.name.replace(/s$/, '') })
+                        }
+                        onClick={() => {
+                          actions.addReferenceInput(workflowNode.id, port.id)
+                          setMoreOpen(false)
+                        }}
+                      />
+                    ))}
+                  </>
+                ) : null}
                 {type === 'input.video' || output?.type === 'video' ? (
                   <>
                     <label className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[10px] text-zinc-600">
@@ -1528,7 +1644,7 @@ function NodeActionToolbar({
                     }
                     onClick={() => {
                       setMoreOpen(false)
-                      setImageToolsOpen(true)
+                      openImageTool('crop')
                     }}
                   />
                 ) : null}
@@ -1580,11 +1696,11 @@ function NodeActionToolbar({
                     }}
                   />
                 )}
-                {type === 'ai.generate-image' || type === 'ai.edit-image' ? (
+                {output?.type === 'image' ? (
                   <>
                     <div className="my-1.5 border-t border-zinc-100" />
                     <p className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
-                      {t('Image quick toolbar')}
+                      {t('Customize toolbar')}
                     </p>
                     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 hover:bg-zinc-50">
                       <span>{t('Show Download')}</span>
@@ -1610,6 +1726,26 @@ function NodeActionToolbar({
                         onChange={() => toggleQuickAction('prompt')}
                       />
                     </label>
+                    {(
+                      [
+                        ['mask-edit', 'Show Paint a Mask'],
+                        ['crop', 'Show Crop image'],
+                        ['upscale', 'Show Increase image resolution'],
+                        ['image-detail', 'Show View image detail'],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <label
+                        key={id}
+                        className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 hover:bg-zinc-50"
+                      >
+                        <span>{t(label)}</span>
+                        <input
+                          type="checkbox"
+                          checked={!hiddenQuickActions.includes(id)}
+                          onChange={() => toggleQuickAction(id)}
+                        />
+                      </label>
+                    ))}
                     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 hover:bg-zinc-50">
                       <span>{t('Show action labels')}</span>
                       <input
@@ -1641,6 +1777,7 @@ function NodeActionToolbar({
                 output?.metadata?.filename || output?.metadata?.fileName || workflowNode.name,
               )}
               imageURL={imageToolsURL}
+              initialAction={activeImageTool}
               onClose={() => setImageToolsOpen(false)}
               onCreated={(action, assets) =>
                 actions.addDerivedImages(workflowNode.id, action, assets)
@@ -2213,6 +2350,11 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
     width: number
     height: number
   } | null>(null)
+  const [measuredVideo, setMeasuredVideo] = useState<{
+    source: string
+    width: number
+    height: number
+  } | null>(null)
   const configuredImageWidth = Number(
     previewObject?.width ?? data.workflowNode.config.imageWidth ?? 0,
   )
@@ -2228,11 +2370,15 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
   const mediaRatio =
     mediaType === 'image' && imageDimensions
       ? `${imageDimensions.width} / ${imageDimensions.height}`
-      : `${ratioWidth || 1} / ${ratioHeight || 1}`
+      : mediaType === 'video' && measuredVideo?.source === mediaValue
+        ? `${measuredVideo.width} / ${measuredVideo.height}`
+        : `${ratioWidth || 1} / ${ratioHeight || 1}`
   const mediaRatioLabel =
     mediaType === 'image' && imageDimensions
       ? imageRatioLabel(imageDimensions.width, imageDimensions.height)
-      : ratio
+      : mediaType === 'video' && measuredVideo?.source === mediaValue
+        ? imageRatioLabel(measuredVideo.width, measuredVideo.height)
+        : ratio
   const imageRatioLocked = data.workflowNode.config.lockImageAspectRatio !== false
   const imageDisplayWidth = Math.max(
     180,
@@ -2404,6 +2550,16 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                   src={mediaValue}
                   controls
                   className="size-full object-contain"
+                  onLoadedMetadata={(event) => {
+                    const { videoWidth, videoHeight } = event.currentTarget
+                    if (videoWidth > 0 && videoHeight > 0) {
+                      setMeasuredVideo({
+                        source: mediaValue,
+                        width: videoWidth,
+                        height: videoHeight,
+                      })
+                    }
+                  }}
                 />
               ) : mediaAssetId ? (
                 <Image
@@ -2488,6 +2644,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
           onToolbarPointerLeave={hideHoverToolbar}
           aspectRatioValue={mediaType === 'image' ? mediaRatioLabel : undefined}
           videoRef={videoPreviewRef}
+          onOpenPreview={() => setPreviewOpen(true)}
         />
         {previewOpen && mediaValue && typeof document !== 'undefined'
           ? createPortal(
@@ -2930,6 +3087,7 @@ function hasGeneratedMediaOutput(node: StudioNode) {
 function portColor(dataType?: string) {
   if (dataType === 'image') return '#3b82f6'
   if (dataType === 'video') return '#d946ef'
+  if (dataType === 'audio') return '#059669'
   if (dataType === 'json') return '#f59e0b'
   return '#7c3aed'
 }
@@ -3808,6 +3966,61 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     return id
   }
 
+  const addReferenceInput = (targetNodeId: string, targetPortId: string) => {
+    const target = nodes.find((node) => node.id === targetNodeId && !node.data.canvasGroup)
+    const targetDefinition = registryByType.get(target?.data.workflowNode.type || '')
+    const targetPort = targetDefinition?.inputs.find((port) => port.id === targetPortId)
+    const inputType =
+      targetPort?.dataType === 'image' ? 'input.image' : `input.${targetPort?.dataType}`
+    const inputDefinition = registryByType.get(inputType)
+    const sourcePort = inputDefinition?.outputs.find(
+      (port) => port.dataType === targetPort?.dataType,
+    )
+    if (!target || !targetPort || !inputDefinition?.available || !sourcePort) return
+    if (
+      !targetPort.multiple &&
+      edges.some((edge) => edge.target === targetNodeId && targetPortForEdge(edge) === targetPortId)
+    ) {
+      setError(`The ${targetPort.name.toLowerCase()} input is already connected.`)
+      return
+    }
+
+    const id = `${inputType.replaceAll('.', '-')}-${crypto.randomUUID().slice(0, 8)}`
+    const position = { x: target.position.x, y: target.position.y + 360 }
+    const workflowNode: WorkflowNode = {
+      id,
+      type: inputType,
+      name: inputDefinition.displayName,
+      slug: `${inputType.replaceAll('.', '-')}-${id.slice(-4)}`,
+      position,
+      config: cloneValue(inputDefinition.defaultConfig),
+    }
+    captureHistory()
+    setNodes((current) => [
+      ...current,
+      { id, type: 'studioNode', position, data: { workflowNode } },
+    ])
+    setEdges((current) =>
+      addEdge(
+        {
+          id: `edge-${crypto.randomUUID().slice(0, 8)}`,
+          source: id,
+          sourceHandle: sourcePort.id,
+          target: targetNodeId,
+          targetHandle: `type-${targetPort.dataType}`,
+          data: { targetPort: targetPort.id },
+          type: 'bezier',
+          style: { stroke: portColor(targetPort.dataType), strokeWidth: 2 },
+        },
+        current,
+      ),
+    )
+    setSelectedId(id)
+    setInspectorOpen(false)
+    setDirty(true)
+    setError('')
+  }
+
   const generateImageFromText = (sourceNodeId: string) => {
     const sourceNode = nodes.find((node) => node.id === sourceNodeId && !node.data.canvasGroup)
     const sourceType = sourceNode?.data.workflowNode.type
@@ -4373,10 +4586,29 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const updateNodeConfig = (nodeId: string, patch: Record<string, unknown>) => {
     const target = nodes.find((node) => node.id === nodeId)
     if (!target) return
-    const ratioChanged =
-      Object.hasOwn(patch, 'aspectRatio') &&
-      String(patch.aspectRatio) !== String(target.data.workflowNode.config.aspectRatio)
-    const configPatch = ratioChanged
+    const imageOrVideoGenerator = [
+      'ai.generate-image',
+      'ai.edit-image',
+      'ai.generate-video',
+      'ai.image-to-video',
+    ].includes(target.data.workflowNode.type)
+    const generationSettingsChanged =
+      imageOrVideoGenerator &&
+      Object.entries(patch).some(
+        ([key, value]) =>
+          [
+            'aspectRatio',
+            'quality',
+            'duration',
+            'resolution',
+            'size',
+            'count',
+            'generateAudio',
+            'provider',
+            'model',
+          ].includes(key) && String(value) !== String(target.data.workflowNode.config[key]),
+      )
+    const configPatch = generationSettingsChanged
       ? {
           ...patch,
           selectedOutput: null,
@@ -4966,7 +5198,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               onClose={() => setPaletteOpen(false)}
               searchNodes={paletteSearch}
               onSearchNodes={setPaletteSearch}
-              onAddNode={addNode}
               onInsertAsset={insertAsset}
               onInsertPrompt={insertPrompt}
               canvasNodes={workflowNodes.map((node) => {
@@ -5130,6 +5361,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                       }
                     : {}),
                 }),
+              addReferenceInput,
               updateGroup,
               ungroup,
               runGroup: (groupId) => {
@@ -5420,20 +5652,19 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             >
               <X size={15} />
             </DockButton>
-          </div>
-          <div className="absolute bottom-[4.5rem] right-3 z-20 flex items-center gap-1 rounded-xl border border-zinc-200 bg-white/95 p-1 shadow-lg backdrop-blur sm:bottom-20 sm:right-4">
+            <DockDivider />
             <button
               type="button"
               aria-label="Zoom out"
               title="Zoom out"
               onClick={() => void zoomOut()}
-              className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
             >
               <span aria-hidden="true" className="text-lg leading-none">
                 −
               </span>
             </button>
-            <span className="min-w-10 text-center text-[10px] font-medium tabular-nums text-zinc-500">
+            <span className="min-w-10 shrink-0 text-center text-[10px] font-medium tabular-nums text-zinc-500">
               {zoomPercent}%
             </span>
             <button
@@ -5441,7 +5672,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               aria-label="Zoom in"
               title="Zoom in"
               onClick={() => void zoomIn()}
-              className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
             >
               <span aria-hidden="true" className="text-lg leading-none">
                 +
@@ -5453,7 +5684,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               aria-label="Fit all nodes"
               title="Fit all nodes"
               onClick={() => fitView({ padding: 0.18, duration: 300 })}
-              className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
             >
               <Maximize2 size={14} />
             </button>
@@ -5463,7 +5694,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               aria-pressed={showMinimap}
               title={showMinimap ? 'Hide minimap' : 'Show minimap'}
               onClick={() => setShowMinimap((visible) => !visible)}
-              className={`grid size-8 place-items-center rounded-lg hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600 ${showMinimap ? 'text-violet-700' : 'text-zinc-500'}`}
+              className={`grid size-8 shrink-0 place-items-center rounded-lg hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600 ${showMinimap ? 'text-violet-700' : 'text-zinc-500'}`}
             >
               <LayoutGrid size={14} />
             </button>
@@ -5472,7 +5703,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               aria-label="Keyboard shortcuts"
               title="Keyboard shortcuts"
               onClick={() => setShortcutsOpen(true)}
-              className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
             >
               <CircleAlert size={14} />
             </button>
@@ -6605,6 +6836,18 @@ function MediaConfiguration({
   const hasModelOptions =
     providerModels.length > 0 && (!currentModel || providerModels.includes(currentModel))
   const isVideoGenerator = isAI && modality === 'video'
+  const isImageGenerator = ['ai.generate-image', 'ai.edit-image'].includes(type)
+  const imageResolution = String(config.resolution || '1k')
+  const imageAspectRatio = String(config.aspectRatio || '1:1')
+  const imageDimensions = readImageDimensions(config.size, imageResolution, imageAspectRatio)
+  const [imageWidthDraft, setImageWidthDraft] = useState(String(imageDimensions.width))
+  const [imageHeightDraft, setImageHeightDraft] = useState(String(imageDimensions.height))
+  const [imageCountDraft, setImageCountDraft] = useState(String(normalizeImageCount(config.count)))
+  useEffect(() => {
+    setImageWidthDraft(String(imageDimensions.width))
+    setImageHeightDraft(String(imageDimensions.height))
+  }, [imageDimensions.height, imageDimensions.width])
+  useEffect(() => setImageCountDraft(String(normalizeImageCount(config.count))), [config.count])
   const ratios = imageAspectRatios
   return (
     <div className="space-y-4">
@@ -6793,7 +7036,14 @@ function MediaConfiguration({
                 key={ratio}
                 type="button"
                 aria-pressed={config.aspectRatio === ratio}
-                onClick={() => onChange('aspectRatio', ratio)}
+                onClick={() =>
+                  isImageGenerator
+                    ? onChangeMany({
+                        aspectRatio: ratio,
+                        size: `${imageSizeFromSettings(imageResolution, ratio).width}x${imageSizeFromSettings(imageResolution, ratio).height}`,
+                      })
+                    : onChange('aspectRatio', ratio)
+                }
                 className={`rounded-full border px-2.5 py-1.5 text-[10px] font-medium ${config.aspectRatio === ratio ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-500'}`}
               >
                 {ratio}
@@ -6802,6 +7052,109 @@ function MediaConfiguration({
           </div>
         </div>
       )}
+      {isImageGenerator ? (
+        <div className="space-y-3 rounded-xl border border-zinc-100 p-3">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Resolution
+            <select
+              value={imageResolution}
+              onChange={(event) => {
+                const dimensions = imageSizeFromSettings(event.target.value, imageAspectRatio)
+                onChangeMany({
+                  resolution: event.target.value,
+                  size: `${dimensions.width}x${dimensions.height}`,
+                })
+              }}
+              className="mt-1.5 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs font-normal normal-case text-zinc-700"
+            >
+              {imageResolutionOptions.map((resolution) => (
+                <option key={resolution} value={resolution}>
+                  {resolution === 'auto' ? 'Auto' : resolution.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Custom image size
+            </span>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <label className="flex h-10 items-center rounded-lg border border-zinc-200 px-2 text-[10px] text-zinc-400">
+                W
+                <input
+                  type="number"
+                  min="1"
+                  aria-label="Image width"
+                  value={imageWidthDraft}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setImageWidthDraft(value)
+                    const width = Math.floor(Number(value))
+                    if (width > 0) onChange('size', `${width}x${imageDimensions.height}`)
+                  }}
+                  className="min-w-0 flex-1 px-2 text-xs text-zinc-700 outline-none"
+                />
+              </label>
+              <span className="text-zinc-300">×</span>
+              <label className="flex h-10 items-center rounded-lg border border-zinc-200 px-2 text-[10px] text-zinc-400">
+                H
+                <input
+                  type="number"
+                  min="1"
+                  aria-label="Image height"
+                  value={imageHeightDraft}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setImageHeightDraft(value)
+                    const height = Math.floor(Number(value))
+                    if (height > 0) onChange('size', `${imageDimensions.width}x${height}`)
+                  }}
+                  className="min-w-0 flex-1 px-2 text-xs text-zinc-700 outline-none"
+                />
+              </label>
+            </div>
+          </div>
+          <div>
+            <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Image count
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {imageCountQuickOptions.map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  aria-pressed={normalizeImageCount(config.count) === count}
+                  onClick={() => {
+                    setImageCountDraft(String(count))
+                    onChange('count', count)
+                  }}
+                  className={`h-8 rounded-lg border px-2.5 text-[10px] font-medium ${normalizeImageCount(config.count) === count ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-500'}`}
+                >
+                  {count}
+                </button>
+              ))}
+              <input
+                type="number"
+                min="1"
+                max="15"
+                aria-label="Custom image count"
+                value={imageCountDraft}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setImageCountDraft(value)
+                  if (value) onChange('count', normalizeImageCount(value))
+                }}
+                onBlur={() => {
+                  const count = normalizeImageCount(imageCountDraft)
+                  setImageCountDraft(String(count))
+                  onChange('count', count)
+                }}
+                className="h-8 w-16 rounded-lg border border-zinc-200 px-2 text-center text-[10px] font-normal text-zinc-700"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
       {'model' in config && (
         <label className="block">
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
