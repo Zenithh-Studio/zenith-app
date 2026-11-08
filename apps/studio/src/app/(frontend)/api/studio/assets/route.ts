@@ -230,11 +230,16 @@ async function uploadAsset(request: Request) {
   if (!(uploadedFile instanceof File)) {
     return Response.json({ error: 'Choose a media file to upload.' }, { status: 400 })
   }
+  const scope = formData.get('scope')
+  if (scope !== null && scope !== 'workflow') {
+    return Response.json({ error: 'The upload scope is invalid.' }, { status: 400 })
+  }
 
   try {
     const assetService = await getAssetService(session.user)
     const media = await assetService.uploadAsset({
       alt: String(formData.get('alt') || uploadedFile.name),
+      source: scope === 'workflow' ? 'workflow' : 'upload',
       file: {
         buffer: Buffer.from(await uploadedFile.arrayBuffer()),
         mimetype: uploadedFile.type,

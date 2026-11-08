@@ -44,6 +44,13 @@ export interface PayloadMediaApi {
     }
     req?: { user?: AuthenticatedUser | null; context?: Record<string, unknown> }
   }): Promise<unknown>
+  update(options: {
+    collection: 'media'
+    id: string
+    overrideAccess: false
+    data: Record<string, unknown>
+    req?: { user?: AuthenticatedUser | null; context?: Record<string, unknown> }
+  }): Promise<unknown>
   delete(options: {
     collection: 'media'
     id: string
@@ -81,7 +88,15 @@ export class PayloadAssetRepository implements AssetRepository {
 
   async listAssets(options: AssetListOptions = {}): Promise<AssetPage> {
     const search = options.search?.trim()
-    const where: Record<string, unknown>[] = []
+    const where: Record<string, unknown>[] = [
+      {
+        or: [
+          { source: { not_equals: 'workflow' } },
+          { source: { exists: false } },
+          { sourceExecution: { exists: true } },
+        ],
+      },
+    ]
     if (search) {
       where.push({
         or: [
@@ -144,6 +159,17 @@ export class PayloadAssetRepository implements AssetRepository {
     return result.docs.map(asAssetDocument)
   }
 
+  async saveWorkflowUpload(assetId: string) {
+    const media = await this.payloadClient.update({
+      collection: 'media',
+      id: assetId,
+      overrideAccess: false,
+      data: { source: 'upload', sourceWorkflow: null, sourceExecution: null },
+      req: this.request({ assetService: true }),
+    })
+    return asAssetDocument(media)
+  }
+
   async countAssets(search?: string): Promise<AssetTypeCounts> {
     const query = search?.trim()
     const searchWhere = query
@@ -156,7 +182,17 @@ export class PayloadAssetRepository implements AssetRepository {
         }
       : undefined
     const count = async (typeWhere?: Record<string, unknown>) => {
-      const clauses = [searchWhere, typeWhere].filter(Boolean)
+      const clauses = [
+        {
+          or: [
+            { source: { not_equals: 'workflow' } },
+            { source: { exists: false } },
+            { sourceExecution: { exists: true } },
+          ],
+        },
+        searchWhere,
+        typeWhere,
+      ].filter(Boolean)
       const result = await this.payloadClient.count({
         collection: 'media',
         ...(clauses.length ? { where: { and: clauses } } : {}),

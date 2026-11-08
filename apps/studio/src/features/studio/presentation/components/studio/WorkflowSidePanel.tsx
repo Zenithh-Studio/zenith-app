@@ -9,7 +9,6 @@ import {
   FileImage,
   FileText,
   LoaderCircle,
-  PanelLeftClose,
   Search,
   Video,
 } from 'lucide-react'
@@ -59,7 +58,6 @@ function AssetIcon({ asset }: { asset: WorkflowAsset }) {
 
 export function WorkflowSidePanel({
   width,
-  onClose,
   searchNodes,
   onSearchNodes,
   onInsertAsset,
@@ -69,7 +67,6 @@ export function WorkflowSidePanel({
   onFocusNode,
 }: {
   width: number
-  onClose: () => void
   searchNodes: string
   onSearchNodes: (value: string) => void
   onInsertAsset: (asset: WorkflowAsset) => void
@@ -87,6 +84,12 @@ export function WorkflowSidePanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    const onAssetsChanged = () => setReloadKey((value) => value + 1)
+    window.addEventListener('zenith:assets-changed', onAssetsChanged)
+    return () => window.removeEventListener('zenith:assets-changed', onAssetsChanged)
+  }, [])
 
   useEffect(() => {
     if (tab !== 'assets') return
@@ -161,20 +164,6 @@ export function WorkflowSidePanel({
       className="absolute bottom-20 left-2 top-16 z-40 flex max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-10 lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:shadow-none"
       style={{ width: `${width}px` }}
     >
-      <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
-          {t('Workflow panel')}
-        </span>
-        <button
-          type="button"
-          aria-label={t('Close workflow side panel')}
-          title={t('Close side panel')}
-          onClick={onClose}
-          className="grid size-7 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 focus-visible:outline-2 focus-visible:outline-violet-600"
-        >
-          <PanelLeftClose size={14} />
-        </button>
-      </div>
       <div className="grid grid-cols-3 border-b border-zinc-100 p-1.5">
         {tabs.map(({ id, label, Icon }) => (
           <button
@@ -248,14 +237,14 @@ export function WorkflowSidePanel({
                     group.nodeIds.some((nodeId) => matchingNodeIds.has(nodeId)),
                 )
                 .map((group) => (
-                  <details key={group.id} className="group mb-1 rounded-xl border border-zinc-100">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">
+                  <div key={group.id} className="mb-1 rounded-xl border border-zinc-100">
+                    <div className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-zinc-700">
                       <Boxes size={13} className="text-violet-500" />
                       <span className="min-w-0 flex-1 truncate">{group.name}</span>
                       <span className="text-[9px] font-normal text-zinc-400">
                         {group.nodeIds.length}
                       </span>
-                    </summary>
+                    </div>
                     <button
                       type="button"
                       onClick={() => onFocusNode(`__zenith-group-${group.id}`)}
@@ -286,7 +275,7 @@ export function WorkflowSidePanel({
                         )
                       })}
                     </div>
-                  </details>
+                  </div>
                 ))}
               <div className="space-y-0.5">
                 {filteredCanvasNodes

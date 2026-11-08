@@ -129,6 +129,8 @@ export interface AssetDocument {
   mimeType?: string | null
   filesize?: number | null
   alt: string
+  source?: 'upload' | 'workflow' | 'studio' | 'derived' | null
+  sourceExecution?: string | { id: string } | null
   createdAt: string
 }
 

@@ -42,17 +42,20 @@ import {
   Crop,
   Download,
   FileText,
+  BookOpenText,
   GripVertical,
   Image as ImageIcon,
   ImagePlus,
   Hand,
+  Keyboard,
   MousePointer2,
   LayoutGrid,
   LoaderCircle,
   Maximize2,
-  Menu,
   MessageSquareText,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Plus,
   RefreshCw,
@@ -120,7 +123,6 @@ import {
   normalizeImageCount,
   readImageDimensions,
 } from '@znith/utils'
-import { Brand } from './AppChrome'
 import { WorkflowSidePanel } from './WorkflowSidePanel'
 import {
   formatLocaleDate,
@@ -139,6 +141,7 @@ import {
   type NodeActionState,
 } from '@/features/studio/shared/lib/workflow-node-actions'
 import { redactDiagnosticData } from '@/features/studio/shared/lib/node-diagnostics'
+import { appVersion } from '@/lib/app-version'
 
 type StudioNodeData = {
   workflowNode: WorkflowNode
@@ -240,6 +243,7 @@ type NodeActionContextValue = {
   checkVideoTask: (nodeId: string) => Promise<void>
   runNode: (nodeId: string, retry?: boolean) => void
   saveOutputToAssets: (nodeId: string, executionId?: string) => Promise<void>
+  saveWorkflowUpload: (nodeId: string, assetId: string) => Promise<void>
   generateImageFromText: (nodeId: string) => void
   deleteNode: (nodeId: string) => void
   duplicateNode: (nodeId: string) => void
@@ -808,7 +812,9 @@ function NodeActionToolbar({
     hasImageOutput: output?.type === 'image',
     hasSavedImage: Boolean(imageAssetId),
     hasMediaOutput: Boolean(output && ['image', 'video', 'audio'].includes(output.type)),
-    hasSavedOutput: Boolean(output?.assetId || output?.metadata?.assetId),
+    hasSavedOutput: Boolean(
+      !config.workflowUpload && (output?.assetId || output?.metadata?.assetId),
+    ),
   })
   const saveOutputAction = registeredActions.find((item) => item.id === 'save-to-assets')
   const imageToolsAction = registeredActions.find((item) => item.id === 'image-tools')
@@ -1305,10 +1311,15 @@ function NodeActionToolbar({
               onClick={async () => {
                 setSavingOutput(true)
                 try {
-                  await actions.saveOutputToAssets(
-                    workflowNode.id,
-                    currentMediaVersion?.executionId,
-                  )
+                  const uploadedAssetId = String(output?.assetId || output?.metadata?.assetId || '')
+                  if (workflowNode.config.workflowUpload && uploadedAssetId) {
+                    await actions.saveWorkflowUpload(workflowNode.id, uploadedAssetId)
+                  } else {
+                    await actions.saveOutputToAssets(
+                      workflowNode.id,
+                      currentMediaVersion?.executionId,
+                    )
+                  }
                 } finally {
                   setSavingOutput(false)
                 }
@@ -2531,9 +2542,11 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
           <div
             className={`relative grid w-full min-h-0 place-items-center overflow-hidden rounded-2xl border bg-white shadow-[0_12px_30px_rgba(24,24,27,.1)] ${isRunning ? 'border-violet-400 ring-2 ring-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : 'border-zinc-200'}`}
             style={
-              mediaType === 'image' && !imageRatioLocked && imageDisplayHeight
-                ? { height: '100%' }
-                : { aspectRatio: mediaRatio }
+              mediaType === 'audio'
+                ? { minHeight: 76 }
+                : mediaType === 'image' && !imageRatioLocked && imageDisplayHeight
+                  ? { height: '100%' }
+                  : { aspectRatio: mediaRatio }
             }
           >
             {mediaValue ? (
@@ -2541,7 +2554,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                 <audio
                   src={mediaValue}
                   controls
-                  className="w-full px-4"
+                  className="w-full px-3"
                   aria-label={t('{name} audio output', { name: data.workflowNode.name })}
                 />
               ) : mediaType === 'video' ? (
@@ -4365,6 +4378,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         const form = new FormData()
         form.set('file', file)
         form.set('alt', file.name)
+        form.set('scope', 'workflow')
         const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
         const responseBody = await response.json()
         if (!response.ok || !responseBody.media) {
@@ -4375,6 +4389,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         const media = responseBody.media
         const config = {
           assetId: media.id,
+          workflowUpload: true,
           url: mediaSource(media.url, media.id, media.filename),
           fileName: media.filename || file.name,
           mimeType: media.mimeType || file.type,
@@ -4966,7 +4981,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-[#f5f5f6] text-zinc-950">
-      <header className="z-20 flex h-14 shrink-0 items-center border-b border-zinc-200 bg-white px-3 sm:px-4">
+      <header className="z-20 flex h-12 shrink-0 items-center gap-2 bg-[#f5f5f6] px-3 sm:px-4">
         <input
           ref={mediaInput}
           type="file"
@@ -4979,17 +4994,25 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             event.target.value = ''
           }}
         />
-        <div className="hidden w-[250px] items-center gap-3 lg:flex">
-          <Brand />
-        </div>
-        <div className="flex min-w-0 flex-1 items-center gap-2 lg:border-l lg:border-zinc-200 lg:pl-5">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <button
+            type="button"
+            aria-label={paletteOpen ? t('Collapse panel') : t('Expand panel')}
+            title={paletteOpen ? t('Collapse panel') : t('Expand panel')}
+            onClick={() => setPaletteOpen((open) => !open)}
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600"
+          >
+            {paletteOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+          </button>
           <Link
-            href="/"
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100"
+            href="/workflows"
+            aria-label={t('Back to workflows')}
+            title={t('Back to workflows')}
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-white/80"
           >
             <ArrowLeft size={17} />
           </Link>
-          <div className="min-w-0">
+          <div className="min-w-0 max-w-[240px] flex-1">
             <input
               value={workflow.name}
               onChange={(event) => {
@@ -5003,20 +5026,73 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Link
+            href="/docs"
+            aria-label={t('nav.docs')}
+            title={t('nav.docs')}
+            className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600"
+          >
+            <BookOpenText size={15} />
+          </Link>
+          <Link
+            href="/settings"
+            aria-label={t('nav.settings')}
+            title={t('nav.settings')}
+            className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600"
+          >
+            <Settings2 size={15} />
+          </Link>
           <button
             type="button"
-            aria-label={t('Workflow menu')}
-            title={t('Workflow menu')}
-            onClick={() => setContextMenu({ x: Math.max(8, window.innerWidth - 248), y: 64 })}
-            className="grid size-8 place-items-center rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-violet-600"
+            aria-label={t('settings.language')}
+            title={t('settings.language')}
+            onClick={async () => {
+              const nextLocale = locale === 'en' ? 'vi' : 'en'
+              try {
+                const response = await fetch('/api/studio/settings', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ locale: nextLocale }),
+                })
+                if (!response.ok) throw new Error('Language preference could not be saved.')
+                document.cookie = `zenith-locale=${nextLocale}; Path=/; SameSite=Lax; Max-Age=31536000`
+                window.location.reload()
+              } catch (failure) {
+                setError(failure instanceof Error ? failure.message : 'Language could not change.')
+              }
+            }}
+            className="grid h-8 min-w-8 place-items-center rounded-lg px-1.5 text-[10px] font-semibold uppercase text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600"
           >
-            <Settings2 size={14} />
+            {locale}
           </button>
+          <span className="hidden px-1 text-[10px] font-medium tabular-nums text-zinc-500 sm:inline">
+            v{appVersion}
+          </span>
+          <a
+            href="https://github.com/Zenithh-Studio/Zenith"
+            target="_blank"
+            rel="noreferrer"
+            aria-label={t('GitHub repository')}
+            title={t('GitHub repository')}
+            className="hidden size-8 place-items-center rounded-lg text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600 sm:grid"
+          >
+            <Code2 size={15} />
+          </a>
+          <button
+            type="button"
+            aria-label={t('Keyboard shortcuts')}
+            title={t('Keyboard shortcuts')}
+            onClick={() => setShortcutsOpen(true)}
+            className="grid size-8 place-items-center rounded-lg text-zinc-600 hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-violet-600"
+          >
+            <Keyboard size={15} />
+          </button>
+          <span className="mx-1 h-5 border-l border-zinc-300" />
           <button
             onClick={() => save()}
             disabled={saving || !dirty}
-            className="inline-flex h-8 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-xs font-medium text-zinc-700 disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white/70 px-2.5 text-xs font-medium text-zinc-700 disabled:opacity-40 sm:px-3"
           >
             <Save size={14} />{' '}
             <span className="hidden sm:inline">{saving ? t('Saving') : t('Save')}</span>
@@ -5024,7 +5100,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           {mediaUploadProgress ? (
             <div
               aria-live="polite"
-              className="hidden items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-medium text-blue-700 sm:flex"
+              className="hidden items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-medium text-blue-700 xl:flex"
               role="status"
             >
               <LoaderCircle size={12} className="animate-spin" />
@@ -5035,12 +5111,12 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <div
               aria-live="polite"
               aria-label={`Running: ${runningNodeLabel}`}
-              className="hidden max-w-[240px] items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-[10px] font-medium text-violet-800 md:flex"
+              className="hidden max-w-[190px] items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-2.5 py-2 text-[10px] font-medium text-violet-800 xl:flex"
               role="status"
               title={runningNodeLabel}
             >
               <LoaderCircle size={13} className="shrink-0 animate-spin" />
-              <span className="max-w-[150px] truncate">{runningNodeLabel}</span>
+              <span className="max-w-[110px] truncate">{runningNodeLabel}</span>
               <span className="shrink-0 tabular-nums text-violet-600">
                 {formatLocaleNumber(completedRunNodeCount, locale)}/
                 {formatLocaleNumber(runScopeIds.length, locale)}
@@ -5051,23 +5127,25 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             <button
               type="button"
               onClick={() => void stopRun()}
+              aria-label={t('Stop active run')}
+              title={t('Stop active run')}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-rose-500"
             >
               <X size={13} />
-              {t('Stop active run')}
+              <span className="hidden sm:inline">{t('Stop active run')}</span>
             </button>
           )}
           <button
             onClick={() => run()}
             disabled={running || workflowNodes.length === 0}
-            className="inline-flex h-8 items-center gap-2 rounded-lg bg-violet-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-violet-200 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white shadow-sm shadow-violet-200 disabled:opacity-50 sm:gap-2 sm:px-3.5"
           >
             {running ? (
               <LoaderCircle size={14} className="animate-spin" />
             ) : (
               <Play size={14} fill="currentColor" />
             )}{' '}
-            {running ? t('Running') : t('Run all')}
+            <span className="hidden sm:inline">{running ? t('Running') : t('Run all')}</span>
           </button>
         </div>
       </header>
@@ -5195,7 +5273,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           >
             <WorkflowSidePanel
               width={paletteWidth}
-              onClose={() => setPaletteOpen(false)}
               searchNodes={paletteSearch}
               onSearchNodes={setPaletteSearch}
               onInsertAsset={insertAsset}
@@ -5266,16 +5343,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         )}
 
         <section className="relative min-w-0 flex-1">
-          {!paletteOpen && (
-            <button
-              onClick={() => setPaletteOpen(true)}
-              className="absolute left-3 top-3 z-20 grid size-10 place-items-center rounded-xl border border-zinc-200 bg-white text-zinc-600 shadow-lg"
-              aria-label="Open workflow side panel"
-              title="Open workflow side panel"
-            >
-              <Menu size={17} />
-            </button>
-          )}
           <NodeActionContext.Provider
             value={{
               isWorkflowRunning: running,
@@ -5329,6 +5396,38 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                     failure instanceof Error
                       ? failure.message
                       : 'Output could not be saved to Assets.',
+                  )
+                }
+              },
+              saveWorkflowUpload: async (nodeId, assetId) => {
+                setError('')
+                try {
+                  const response = await fetch('/api/studio/assets/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assetId }),
+                  })
+                  const body = (await response.json()) as { error?: string }
+                  if (!response.ok) {
+                    throw new Error(body.error || 'Upload could not be saved to Assets.')
+                  }
+                  window.dispatchEvent(new Event('zenith:assets-changed'))
+                  updateNodeConfig(nodeId, { workflowUpload: false })
+                  const definition = definitionFromState()
+                  const nextDefinition = {
+                    ...definition,
+                    nodes: definition.nodes.map((node) =>
+                      node.id === nodeId
+                        ? { ...node, config: { ...node.config, workflowUpload: false } }
+                        : node,
+                    ),
+                  }
+                  if (await save(nextDefinition)) setNotice('Asset saved to Assets.')
+                } catch (failure) {
+                  setError(
+                    failure instanceof Error
+                      ? failure.message
+                      : 'Upload could not be saved to Assets.',
                   )
                 }
               },
@@ -5698,20 +5797,11 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             >
               <LayoutGrid size={14} />
             </button>
-            <button
-              type="button"
-              aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts"
-              onClick={() => setShortcutsOpen(true)}
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-violet-600"
-            >
-              <CircleAlert size={14} />
-            </button>
           </div>
         </section>
 
         {inspectorOpen && (
-          <aside className="fixed bottom-0 right-0 top-14 z-30 flex w-80 max-w-[calc(100vw-1rem)] shrink-0 flex-col border-l border-zinc-200 bg-white shadow-2xl xl:static xl:z-10 xl:max-w-none xl:shadow-none">
+          <aside className="fixed bottom-0 right-0 top-12 z-30 flex w-80 max-w-[calc(100vw-1rem)] shrink-0 flex-col border-l border-zinc-200 bg-white shadow-2xl xl:static xl:z-10 xl:max-w-none xl:shadow-none">
             <div className="flex h-13 items-center justify-between border-b border-zinc-100 px-4">
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
                 {selectedGroup ? 'Group inspector' : selectedNode ? 'Node inspector' : 'Execution'}

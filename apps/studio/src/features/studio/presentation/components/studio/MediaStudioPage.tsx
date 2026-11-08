@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   Maximize2,
   Search,
+  Save,
   Sparkles,
   Video,
   X,
@@ -46,6 +47,7 @@ type StudioAsset = {
   mimeType?: string | null
   filesize?: number | null
   alt: string
+  source?: 'upload' | 'workflow' | 'studio' | 'derived' | null
   createdAt: string
 }
 type StudioGeneration = {
@@ -360,6 +362,7 @@ export function MediaStudioPage({
     const form = new FormData()
     form.set('file', reference)
     form.set('alt', reference.name)
+    form.set('scope', 'workflow')
     try {
       const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
       const body = (await response.json()) as { media?: StudioAsset; error?: string }
@@ -376,6 +379,28 @@ export function MediaStudioPage({
       })
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Could not upload reference image.'))
+    }
+  }
+
+  const saveReferenceAsset = async (assetId: string) => {
+    setError('')
+    try {
+      const response = await fetch('/api/studio/assets/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId }),
+      })
+      const body = (await response.json()) as { media?: StudioAsset; error?: string }
+      if (!response.ok || !body.media)
+        throw new Error(body.error || 'Reference could not be saved to Assets.')
+      setReferenceAssets((current) =>
+        current.map((asset) => (asset.id === assetId ? { ...asset, source: 'upload' } : asset)),
+      )
+      window.dispatchEvent(new Event('zenith:assets-changed'))
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : 'Reference could not be saved to Assets.',
+      )
     }
   }
 
@@ -671,7 +696,9 @@ export function MediaStudioPage({
                       </select>
                     </label>
                   ) : null}
-                  {modality === 'image' ? (
+                </div>
+                {modality === 'image' ? (
+                  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                     <div className="text-xs font-semibold text-zinc-600">
                       {t('Image size')}
                       <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -708,8 +735,6 @@ export function MediaStudioPage({
                         </label>
                       </div>
                     </div>
-                  ) : null}
-                  {modality === 'image' ? (
                     <div className="text-xs font-semibold text-zinc-600">
                       {t('Image count')}
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -747,8 +772,8 @@ export function MediaStudioPage({
                         />
                       </div>
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -809,6 +834,17 @@ export function MediaStudioPage({
                               className="object-cover"
                             />
                           )}
+                          {asset.source === 'workflow' ? (
+                            <button
+                              type="button"
+                              aria-label={t('Save reference to Assets')}
+                              title={t('Save reference to Assets')}
+                              onClick={() => void saveReferenceAsset(asset.id)}
+                              className="absolute left-1 top-1 grid size-6 place-items-center rounded-full bg-white/95 text-zinc-700 shadow"
+                            >
+                              <Save size={12} />
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             aria-label={t('Remove {name}', {

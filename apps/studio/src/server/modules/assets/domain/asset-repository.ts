@@ -58,6 +58,7 @@ export interface AssetRepository {
   listAssets(options?: AssetListOptions): Promise<AssetPage>
   countAssets(search?: string): Promise<AssetTypeCounts>
   findAssetsByIds(assetIds: string[]): Promise<AssetDocument[]>
+  saveWorkflowUpload(assetId: string): Promise<AssetDocument>
   createAsset(data: CreateAssetRecord): Promise<AssetDocument>
   deleteAssets(assetIds: string[], options?: { assetReferencesCleared?: boolean }): Promise<void>
   getQuota(): Promise<AssetQuota>

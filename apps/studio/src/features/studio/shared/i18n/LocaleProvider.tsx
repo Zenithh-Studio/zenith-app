@@ -399,6 +399,10 @@ const additionalVietnamese: Record<string, string> = {
   'We could not sign you in automatically. If you already have an account, use its existing password. Otherwise, retry signup.':
     'Không thể đăng nhập tự động. Nếu bạn đã có tài khoản, hãy dùng mật khẩu hiện tại. Nếu chưa, hãy thử đăng ký lại.',
   'Back to workflows': 'Quay lại quy trình',
+  'Collapse panel': 'Thu gọn bảng điều khiển',
+  'Expand panel': 'Mở rộng bảng điều khiển',
+  'GitHub repository': 'Kho mã GitHub',
+  'Save reference to Assets': 'Lưu tài liệu tham chiếu vào Tài sản',
   'Workflow guide': 'Hướng dẫn quy trình',
   'Build typed production graphs, configure providers later, and inspect every persisted execution.':
     'Tạo đồ thị quy trình có kiểu dữ liệu, cấu hình provider và kiểm tra từng lần chạy đã lưu.',

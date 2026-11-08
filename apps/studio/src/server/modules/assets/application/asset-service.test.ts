@@ -23,6 +23,10 @@ class MemoryAssetRepository implements AssetRepository {
     return assetIds.map((id) => ({ id, filesize: 4 }) as AssetDocument)
   }
 
+  async saveWorkflowUpload(assetId: string) {
+    return { id: assetId, alt: 'Saved upload', createdAt: '2026-11-05T00:00:00.000Z' }
+  }
+
   async getQuota() {
     return { usedBytes: this.usedBytes, limitBytes: 5 * 1024 ** 3 }
   }

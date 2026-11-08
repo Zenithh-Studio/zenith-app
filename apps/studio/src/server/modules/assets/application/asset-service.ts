@@ -143,6 +143,16 @@ export class AssetService {
     return this.repository.findAssetsByIds(assetIds)
   }
 
+  async saveWorkflowUpload(assetId: string): Promise<AssetDocument> {
+    if (typeof assetId !== 'string' || !assetId.trim() || assetId.length > 128) {
+      throw new AssetValidationError('Choose a valid workflow upload to save.', 400)
+    }
+    const [asset] = await this.repository.findAssetsByIds([assetId])
+    if (!asset) throw new AssetValidationError('The workflow upload was not found.', 404)
+    if (asset.source !== 'workflow' || asset.sourceExecution) return asset
+    return this.repository.saveWorkflowUpload(assetId)
+  }
+
   async uploadAsset(input: CreateAssetRecord): Promise<AssetDocument> {
     const [asset] = await this.uploadAssets([input])
     return asset
