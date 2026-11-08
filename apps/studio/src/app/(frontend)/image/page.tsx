@@ -32,8 +32,10 @@ export default async function ImageStudioRoute() {
         model,
         aspectRatio: String(settings.imagePreferences.aspectRatio || '1:1'),
         quality: String(settings.imagePreferences.quality || 'standard'),
+        size: String(settings.imagePreferences.size || '1024x1024'),
+        count: Number(settings.imagePreferences.count || 1),
         duration: 5,
-        resolution: '720p',
+        resolution: String(settings.imagePreferences.resolution || '1k'),
       }}
       isAdmin={appUserRole(session.user) === 'admin'}
     />

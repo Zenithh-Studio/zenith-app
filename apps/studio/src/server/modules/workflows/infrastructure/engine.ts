@@ -3,7 +3,7 @@ import 'server-only'
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
 import { registryByType, validateWorkflowDefinition } from '@znith/contracts'
-import { clampNumber } from '@znith/utils'
+import { clampNumber, imageSizeFromSettings, normalizeImageCount } from '@znith/utils'
 import type {
   NodeExecutionRecord,
   NodeValue,
@@ -114,17 +114,25 @@ type ImageAPIResponse = {
   error?: { message?: string }
 }
 
-function chatGPT2APIImageSize(aspectRatio: unknown) {
-  const sizeByRatio: Record<string, string> = {
-    '9:16': '864x1536',
-    '2:3': '1024x1536',
-    '3:4': '768x1024',
-    '1:1': '1024x1024',
-    '4:3': '1024x768',
-    '3:2': '1536x1024',
-    '16:9': '1536x864',
-  }
-  return sizeByRatio[text(aspectRatio || '1:1')] ?? '1024x1024'
+function chatGPT2APIImageSize(aspectRatio: unknown, size?: unknown, resolution?: unknown) {
+  const customSize = text(size).trim()
+  if (/^\d+x\d+$/i.test(customSize)) return customSize
+  const dimensions = imageSizeFromSettings(text(resolution || '1k'), text(aspectRatio || '1:1'))
+  return `${dimensions.width}x${dimensions.height}`
+}
+
+function configuredImageSize(config: Record<string, unknown>) {
+  const customSize = text(config.size).trim()
+  if (/^\d+x\d+$/i.test(customSize)) return customSize
+  const dimensions = imageSizeFromSettings(
+    text(config.resolution || '1k'),
+    text(config.aspectRatio || '1:1'),
+  )
+  return `${dimensions.width}x${dimensions.height}`
+}
+
+function configuredImageCount(config: Record<string, unknown>) {
+  return normalizeImageCount(config.count)
 }
 
 function imageResultURL(image?: ImageAPIItem) {
@@ -619,7 +627,7 @@ async function generateText(node: WorkflowNode, prompt: string) {
   return { value: result.choices?.[0]?.message?.content || '', usage: result.usage }
 }
 
-async function executeNode(
+async function executeNodeOnce(
   node: WorkflowNode,
   inputs: Record<string, NodeValue[]>,
   options: {
@@ -949,6 +957,9 @@ async function executeNode(
           image: inputs.image?.[0] ? absoluteMediaURL(inputs.image[0].value) : undefined,
           images: inputs.image?.map((item) => absoluteMediaURL(item.value)),
           aspectRatio: node.config.aspectRatio,
+          size: configuredImageSize(node.config),
+          resolution: node.config.resolution || '1k',
+          count: 1,
         })
         const url = mediaURL(result.url || result.output || result.data)
         if (!url) throw new Error('Custom provider completed without a media URL.')
@@ -958,7 +969,11 @@ async function executeNode(
         const generated = await requestChatGPT2APIImage({
           model: text(node.config.model || 'gpt-image-2'),
           prompt,
-          size: chatGPT2APIImageSize(node.config.aspectRatio),
+          size: chatGPT2APIImageSize(
+            node.config.aspectRatio,
+            node.config.size,
+            node.config.resolution,
+          ),
           references: inputs.image,
         })
         return {
@@ -975,8 +990,7 @@ async function executeNode(
         }
       }
       const apiKey = requireSecret('APP_OPENAI_API_KEY')
-      const ratio = text(node.config.aspectRatio)
-      const size = ratio === '16:9' ? '1792x1024' : ratio === '9:16' ? '1024x1792' : '1024x1024'
+      const size = configuredImageSize(node.config)
       if (inputs.image?.[0]) {
         const form = new FormData()
         form.set('model', text(node.config.model || 'dall-e-2'))
@@ -1060,7 +1074,11 @@ async function executeNode(
         const generated = await requestChatGPT2APIImage({
           model: text(node.config.model || 'gpt-image-2'),
           prompt: text(inputs.prompt?.[0]?.value || node.config.prompt),
-          size: chatGPT2APIImageSize(node.config.aspectRatio),
+          size: chatGPT2APIImageSize(
+            node.config.aspectRatio,
+            node.config.size,
+            node.config.resolution,
+          ),
           references: inputs.image,
         })
         return {
@@ -1082,6 +1100,7 @@ async function executeNode(
       const form = new FormData()
       form.set('model', text(node.config.model || 'gpt-image-1'))
       form.set('prompt', text(inputs.prompt?.[0]?.value || node.config.prompt))
+      form.set('size', configuredImageSize(node.config))
       form.set(
         'image',
         new Blob([await source.arrayBuffer()], {
@@ -1136,6 +1155,8 @@ async function executeNode(
           images: inputs.image?.map((item) => absoluteMediaURL(item.value)),
           video: inputs.video?.[0] ? absoluteMediaURL(inputs.video[0].value) : undefined,
           videos: inputs.video?.map((item) => absoluteMediaURL(item.value)),
+          audio: inputs.audio?.[0] ? absoluteMediaURL(inputs.audio[0].value) : undefined,
+          audios: inputs.audio?.map((item) => absoluteMediaURL(item.value)),
           aspectRatio: node.config.aspectRatio,
           duration: Number(node.config.duration) || 5,
           resolution: node.config.resolution,
@@ -1146,6 +1167,9 @@ async function executeNode(
         return { video: { type: 'video', value: { url }, metadata: { provider } } }
       }
       if (provider === 'muse2api') {
+        if (inputs.audio?.length) {
+          throw new Error('Muse2API does not support voice reference inputs.')
+        }
         if (inputs.image && inputs.image.length > 1) {
           throw new Error('Muse2API accepts one first-frame image per video request.')
         }
@@ -1185,7 +1209,10 @@ async function executeNode(
       ) {
         if (
           inputs.video?.length &&
-          (provider !== 'replicate' || model !== 'bytedance/seedance-2.5')
+          !(
+            (provider === 'replicate' && model === 'bytedance/seedance-2.5') ||
+            (provider === 'gemini' && model === 'gemini-omni-1.1-flash')
+          )
         ) {
           throw new Error(`${provider} ${model} does not support reference videos in this node.`)
         }
@@ -1204,8 +1231,12 @@ async function executeNode(
           duration: Number(node.config.duration) || 5,
           resolution: text(node.config.resolution || '720p'),
           generateAudio: node.config.generateAudio !== false,
+          firstFrame: node.type === 'ai.image-to-video',
           image: inputs.image?.length ? inputs.image[0].value : undefined,
+          images: inputs.image?.map((item) => item.value),
           video: inputs.video?.length ? inputs.video[0].value : undefined,
+          videos: inputs.video?.map((item) => item.value),
+          audio: inputs.audio?.map((item) => item.value),
           timeoutMs: Number(node.config.timeoutMs) || 300_000,
           onTaskCreated: (task) => options.onProviderTask?.(node.id, task),
         })
@@ -1239,6 +1270,12 @@ async function executeNode(
           ? {
               video: absoluteMediaURL(inputs.video[0].value),
               videos: inputs.video.map((item) => absoluteMediaURL(item.value)),
+            }
+          : {}),
+        ...(inputs.audio?.length
+          ? {
+              audio: absoluteMediaURL(inputs.audio[0].value),
+              audios: inputs.audio.map((item) => absoluteMediaURL(item.value)),
             }
           : {}),
         aspect_ratio: node.config.aspectRatio,
@@ -1328,6 +1365,28 @@ async function executeNode(
       )
     }
   }
+}
+
+async function executeNode(
+  node: WorkflowNode,
+  inputs: Record<string, NodeValue[]>,
+  options: {
+    onProviderTask?: (
+      nodeId: string,
+      task: { provider: string; model: string; taskId: string },
+    ) => Promise<void> | void
+  } = {},
+): Promise<Record<string, NodeValue>> {
+  const outputs = await executeNodeOnce(node, inputs, options)
+  if (!['ai.generate-image', 'ai.edit-image'].includes(node.type)) return outputs
+
+  const count = configuredImageCount(node.config)
+  for (let index = 2; index <= count; index += 1) {
+    const nextOutput = await executeNodeOnce(node, inputs, options)
+    const image = nextOutput.image
+    if (image) outputs[`image-${index}`] = image
+  }
+  return outputs
 }
 
 export async function runStudioNode(

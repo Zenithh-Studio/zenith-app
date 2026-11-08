@@ -34,6 +34,8 @@ export default async function VideoStudioRoute() {
         quality: 'standard',
         duration: Number(settings.videoPreferences.duration || 5),
         resolution: String(settings.videoPreferences.resolution || '720p'),
+        size: '1024x1024',
+        count: 1,
       }}
       isAdmin={appUserRole(session.user) === 'admin'}
     />

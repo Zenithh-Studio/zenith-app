@@ -1,9 +1,4 @@
-import {
-  modelDurationOptions,
-  modelResolutionOptions,
-  providersFor,
-  registryByType,
-} from '@znith/contracts'
+import { modelResolutionOptions, providersFor, registryByType } from '@znith/contracts'
 import type { NodeValue, WorkflowNode } from '@znith/contracts'
 import { z } from 'zod'
 import { appUserRole, getAppSession, unauthenticatedResponse } from '@/lib/app-auth'
@@ -29,7 +24,12 @@ const generationSchema = z
     aspectRatio: z.string().optional(),
     quality: z.enum(['draft', 'standard', 'high']).optional(),
     duration: z.number().positive().optional(),
-    resolution: z.enum(['480p', '720p', '1080p']).optional(),
+    resolution: z.enum(['480p', '720p', '1080p', '1k', '2k', '4k', 'auto']).optional(),
+    size: z
+      .string()
+      .regex(/^[1-9]\d*x[1-9]\d*$/)
+      .optional(),
+    count: z.number().int().min(1).max(15).optional(),
     generateAudio: z.boolean().optional(),
     voice: z
       .enum(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'])
@@ -83,6 +83,8 @@ function generationNode(input: StudioGenerationRequest): WorkflowNode {
     ...(input.quality ? { quality: input.quality } : {}),
     ...(input.duration ? { duration: input.duration } : {}),
     ...(input.resolution ? { resolution: input.resolution } : {}),
+    ...(input.size ? { size: input.size } : {}),
+    ...(input.count ? { count: input.count } : {}),
     ...(input.generateAudio !== undefined ? { generateAudio: input.generateAudio } : {}),
     ...(input.voice ? { voice: input.voice } : {}),
     ...(input.format ? { format: input.format } : {}),
@@ -140,17 +142,18 @@ async function generate(
   }
   if (input.modality === 'video') {
     if (
-      input.duration &&
-      !modelDurationOptions(input.provider, input.model).includes(input.duration)
-    ) {
-      throw new Error('This model does not support the selected duration.')
-    }
-    if (
       input.resolution &&
       !modelResolutionOptions(input.provider, input.model).includes(input.resolution)
     ) {
       throw new Error('This model does not support the selected resolution.')
     }
+  }
+  if (
+    input.modality === 'image' &&
+    input.resolution &&
+    !['1k', '2k', '4k', 'auto'].includes(input.resolution)
+  ) {
+    throw new Error('Choose an image resolution.')
   }
 
   const assetService = await getAssetService(user)
@@ -323,6 +326,8 @@ async function retryGeneration(
     quality: config.quality,
     duration: config.duration,
     resolution: config.resolution,
+    size: config.size,
+    count: config.count,
     generateAudio: config.generateAudio,
     voice: config.voice,
     format: config.format,

@@ -24,6 +24,13 @@ import {
   modelResolutionOptions,
   providersFor,
 } from '@znith/contracts'
+import {
+  imageCountQuickOptions,
+  imageResolutionOptions,
+  imageSizeFromSettings,
+  normalizeImageCount,
+  readImageDimensions,
+} from '@znith/utils'
 import { Sidebar } from './AppChrome'
 import {
   formatLocaleBytes,
@@ -64,6 +71,8 @@ type StudioPreferences = {
   quality: string
   duration: number
   resolution: string
+  size?: string
+  count?: number
 }
 
 function assetUrl(asset: StudioAsset) {
@@ -72,7 +81,8 @@ function assetUrl(asset: StudioAsset) {
   )
 }
 
-function firstOutput(generation?: StudioGeneration): StudioAsset | undefined {
+function generationOutputs(generation?: StudioGeneration): StudioAsset[] {
+  const outputs: StudioAsset[] = []
   for (const item of generation?.outputs ?? []) {
     if (!item || typeof item !== 'object') continue
     const relation = item as { relationTo?: string; value?: unknown }
@@ -83,10 +93,14 @@ function firstOutput(generation?: StudioGeneration): StudioAsset | undefined {
       typeof value.id === 'string' &&
       (value.mimeType?.startsWith('image/') || value.mimeType?.startsWith('video/'))
     ) {
-      return value as StudioAsset
+      outputs.push(value as StudioAsset)
     }
   }
-  return undefined
+  return outputs
+}
+
+function firstOutput(generation?: StudioGeneration): StudioAsset | undefined {
+  return generationOutputs(generation)[0]
 }
 
 function Modal({
@@ -166,7 +180,23 @@ export function MediaStudioPage({
   const [aspectRatio, setAspectRatio] = useState(initialPreferences.aspectRatio)
   const [quality, setQuality] = useState(initialPreferences.quality)
   const [duration, setDuration] = useState(initialPreferences.duration)
+  const [customDuration, setCustomDuration] = useState(false)
   const [resolution, setResolution] = useState(initialPreferences.resolution)
+  const [size, setSize] = useState(
+    initialPreferences.size ||
+      `${imageSizeFromSettings(initialPreferences.resolution || '1k', initialPreferences.aspectRatio).width}x${imageSizeFromSettings(initialPreferences.resolution || '1k', initialPreferences.aspectRatio).height}`,
+  )
+  const initialImageDimensions = readImageDimensions(
+    initialPreferences.size,
+    initialPreferences.resolution || '1k',
+    initialPreferences.aspectRatio,
+  )
+  const [imageWidth, setImageWidth] = useState(initialImageDimensions.width)
+  const [imageHeight, setImageHeight] = useState(initialImageDimensions.height)
+  const [imageCount, setImageCount] = useState(normalizeImageCount(initialPreferences.count || 1))
+  const [imageCountDraft, setImageCountDraft] = useState(
+    String(normalizeImageCount(initialPreferences.count || 1)),
+  )
   const [referenceAssets, setReferenceAssets] = useState<StudioAsset[]>([])
   const [history, setHistory] = useState<StudioGeneration[]>([])
   const [selected, setSelected] = useState<StudioGeneration>()
@@ -177,6 +207,7 @@ export function MediaStudioPage({
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [promptPickerOpen, setPromptPickerOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [selectedOutputIndex, setSelectedOutputIndex] = useState(0)
   const [assets, setAssets] = useState<StudioAsset[]>([])
   const [assetSearch, setAssetSearch] = useState('')
   const [prompts, setPrompts] = useState<Array<{ id: string; title: string; content: string }>>([])
@@ -189,8 +220,11 @@ export function MediaStudioPage({
   const resolutionOptions = modelResolutionOptions(provider, model)
   const supportsVideoReference =
     modality === 'video' && provider === 'replicate' && model === 'bytedance/seedance-2.5'
-  const selectedAsset = firstOutput(selected)
+  const selectedAssets = generationOutputs(selected)
+  const selectedAsset = selectedAssets[selectedOutputIndex] || selectedAssets[0]
   const selectedUrl = selectedAsset ? assetUrl(selectedAsset) : ''
+
+  useEffect(() => setSelectedOutputIndex(0), [selected?.id])
 
   const checkSelectedStatus = async (generation = selected) => {
     if (!generation?.providerTaskId || checkingStatus) return
@@ -372,7 +406,9 @@ export function MediaStudioPage({
     model,
     prompt,
     aspectRatio,
-    ...(modality === 'image' ? { quality } : { duration, resolution }),
+    ...(modality === 'image'
+      ? { quality, size, resolution, count: imageCount }
+      : { duration, resolution }),
     referenceAssetIds: referenceAssets.map((asset) => asset.id),
   })
 
@@ -526,7 +562,16 @@ export function MediaStudioPage({
                     {t('Aspect ratio')}
                     <select
                       value={aspectRatio}
-                      onChange={(event) => setAspectRatio(event.target.value)}
+                      onChange={(event) => {
+                        const nextRatio = event.target.value
+                        setAspectRatio(nextRatio)
+                        if (modality === 'image') {
+                          const dimensions = imageSizeFromSettings(resolution, nextRatio)
+                          setImageWidth(dimensions.width)
+                          setImageHeight(dimensions.height)
+                          setSize(`${dimensions.width}x${dimensions.height}`)
+                        }
+                      }}
                       className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-normal text-zinc-700"
                     >
                       {['1:1', '16:9', '9:16', '4:3', '3:2', '2:3', '3:4', '21:9'].map((item) => (
@@ -551,8 +596,19 @@ export function MediaStudioPage({
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Duration')}
                       <select
-                        value={duration}
-                        onChange={(event) => setDuration(Number(event.target.value))}
+                        value={
+                          customDuration || !durationOptions.includes(duration)
+                            ? 'custom'
+                            : duration
+                        }
+                        onChange={(event) => {
+                          if (event.target.value === 'custom') {
+                            setCustomDuration(true)
+                            return
+                          }
+                          setCustomDuration(false)
+                          setDuration(Number(event.target.value))
+                        }}
                         className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-normal text-zinc-700"
                       >
                         {(durationOptions.length
@@ -563,10 +619,44 @@ export function MediaStudioPage({
                             {t('{count} seconds', { count: item })}
                           </option>
                         ))}
+                        <option value="custom">{t('Custom')}</option>
                       </select>
+                      {customDuration || !durationOptions.includes(duration) ? (
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={t('Custom duration in seconds')}
+                          value={duration}
+                          onChange={(event) => setDuration(Number(event.target.value))}
+                          className="mt-2 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-normal text-zinc-700"
+                        />
+                      ) : null}
                     </label>
                   )}
-                  {modality === 'video' ? (
+                  {modality === 'image' ? (
+                    <label className="text-xs font-semibold text-zinc-600">
+                      {t('Resolution')}
+                      <select
+                        value={resolution}
+                        onChange={(event) => {
+                          const nextResolution = event.target.value
+                          const dimensions = imageSizeFromSettings(nextResolution, aspectRatio)
+                          setResolution(nextResolution)
+                          setImageWidth(dimensions.width)
+                          setImageHeight(dimensions.height)
+                          setSize(`${dimensions.width}x${dimensions.height}`)
+                        }}
+                        className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-normal text-zinc-700"
+                      >
+                        {imageResolutionOptions.map((item) => (
+                          <option key={item} value={item}>
+                            {item === 'auto' ? t('Auto') : item.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : modality === 'video' ? (
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Resolution')}
                       <select
@@ -580,6 +670,83 @@ export function MediaStudioPage({
                         ))}
                       </select>
                     </label>
+                  ) : null}
+                  {modality === 'image' ? (
+                    <div className="text-xs font-semibold text-zinc-600">
+                      {t('Image size')}
+                      <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <label className="flex h-10 items-center rounded-lg border border-zinc-200 bg-white px-2 text-[10px] text-zinc-400">
+                          W
+                          <input
+                            type="number"
+                            min="1"
+                            aria-label={t('Image width')}
+                            value={imageWidth}
+                            onChange={(event) => {
+                              const width = Number(event.target.value)
+                              setImageWidth(width)
+                              setSize(`${width}x${imageHeight}`)
+                            }}
+                            className="min-w-0 flex-1 bg-transparent px-2 text-xs text-zinc-700 outline-none"
+                          />
+                        </label>
+                        <span className="text-zinc-300">×</span>
+                        <label className="flex h-10 items-center rounded-lg border border-zinc-200 bg-white px-2 text-[10px] text-zinc-400">
+                          H
+                          <input
+                            type="number"
+                            min="1"
+                            aria-label={t('Image height')}
+                            value={imageHeight}
+                            onChange={(event) => {
+                              const height = Number(event.target.value)
+                              setImageHeight(height)
+                              setSize(`${imageWidth}x${height}`)
+                            }}
+                            className="min-w-0 flex-1 bg-transparent px-2 text-xs text-zinc-700 outline-none"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+                  {modality === 'image' ? (
+                    <div className="text-xs font-semibold text-zinc-600">
+                      {t('Image count')}
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {imageCountQuickOptions.map((count) => (
+                          <button
+                            key={count}
+                            type="button"
+                            aria-pressed={imageCount === count}
+                            onClick={() => {
+                              setImageCount(count)
+                              setImageCountDraft(String(count))
+                            }}
+                            className={`h-9 rounded-lg border px-3 text-xs font-medium ${imageCount === count ? 'border-violet-400 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'}`}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                        <input
+                          type="number"
+                          min="1"
+                          max="15"
+                          aria-label={t('Custom image count')}
+                          value={imageCountDraft}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setImageCountDraft(value)
+                            if (value) setImageCount(normalizeImageCount(value))
+                          }}
+                          onBlur={() => {
+                            const count = normalizeImageCount(imageCountDraft)
+                            setImageCount(count)
+                            setImageCountDraft(String(count))
+                          }}
+                          className="h-9 w-16 rounded-lg border border-zinc-200 bg-white px-2 text-center text-xs font-normal text-zinc-700"
+                        />
+                      </div>
+                    </div>
                   ) : null}
                 </div>
 
@@ -669,7 +836,13 @@ export function MediaStudioPage({
                 <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-4">
                   <button
                     type="submit"
-                    disabled={generating || !prompt.trim() || !models.length}
+                    disabled={
+                      generating ||
+                      !prompt.trim() ||
+                      !models.length ||
+                      (modality === 'image' && (imageWidth < 1 || imageHeight < 1)) ||
+                      (modality === 'video' && duration <= 0)
+                    }
                     className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#292644] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#403a6d] disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     {generating ? (
@@ -763,6 +936,32 @@ export function MediaStudioPage({
                     </p>
                   </div>
                 )}
+                {modality === 'image' && selectedAssets.length > 1 ? (
+                  <div
+                    className="mt-3 flex flex-wrap gap-2"
+                    aria-label={t('Generated image variations')}
+                  >
+                    {selectedAssets.map((asset, index) => (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        aria-label={t('Select image {count}', { count: index + 1 })}
+                        aria-pressed={selectedOutputIndex === index}
+                        onClick={() => setSelectedOutputIndex(index)}
+                        className={`relative size-16 overflow-hidden rounded-lg border-2 bg-zinc-100 ${selectedOutputIndex === index ? 'border-violet-500 ring-2 ring-violet-100' : 'border-zinc-200'}`}
+                      >
+                        <Image
+                          src={assetUrl(asset)}
+                          alt=""
+                          fill
+                          sizes="64px"
+                          unoptimized
+                          className="object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {!selectedUrl && selected && (
                   <div className="mt-3 flex justify-end gap-2">
                     {selected.providerTaskId &&

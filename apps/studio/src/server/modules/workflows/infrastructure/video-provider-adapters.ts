@@ -13,8 +13,12 @@ export interface VideoGenerationInput {
   duration: number
   resolution: string
   generateAudio: boolean
+  firstFrame?: boolean
   image?: unknown
+  images?: unknown[]
   video?: unknown
+  videos?: unknown[]
+  audio?: unknown[]
   timeoutMs: number
   onTaskCreated?: (task: {
     provider: string
@@ -106,9 +110,13 @@ function isPrivateAddress(address: string) {
   )
 }
 
-async function mediaData(value: unknown, maximumBytes: number, expectedType: 'image' | 'video') {
+async function mediaData(
+  value: unknown,
+  maximumBytes: number,
+  expectedType: 'image' | 'video' | 'audio',
+) {
   const source = mediaUrl(value)
-  if (!source) throw new Error('The selected video model requires a media reference.')
+  if (!source) throw new Error('The selected model requires a media reference.')
 
   const dataUri = /^data:([^;,]+);base64,(.+)$/s.exec(source)
   if (dataUri) {
@@ -154,7 +162,7 @@ async function mediaData(value: unknown, maximumBytes: number, expectedType: 'im
   }
   const mimeType =
     response.headers.get('content-type')?.split(';', 1)[0]?.trim() ||
-    (expectedType === 'video' ? 'video/mp4' : 'image/png')
+    (expectedType === 'video' ? 'video/mp4' : expectedType === 'audio' ? 'audio/mp4' : 'image/png')
   return { mimeType, base64: buffer.toString('base64') }
 }
 
@@ -164,7 +172,11 @@ async function imageData(value: unknown, maximumBytes = 10 * 1024 * 1024) {
   return file
 }
 
-async function providerMediaUri(value: unknown, type: 'image' | 'video', maximumBytes: number) {
+async function providerMediaUri(
+  value: unknown,
+  type: 'image' | 'video' | 'audio',
+  maximumBytes: number,
+) {
   const source = mediaUrl(value)
   if (source.startsWith('https://')) return source
   const file = await mediaData(value, maximumBytes, type)
@@ -216,14 +228,39 @@ async function runSeedance(input: VideoGenerationInput): Promise<VideoGeneration
     aspect_ratio: input.aspectRatio || '16:9',
     generate_audio: input.generateAudio,
   }
-  if (input.image && input.video) {
-    throw new Error('Seedance cannot combine a first-frame image with a reference video.')
+  const images = input.images?.length ? input.images : input.image ? [input.image] : []
+  const videos = input.videos?.length ? input.videos : input.video ? [input.video] : []
+  if (images.length > 30) throw new Error('Seedance accepts up to 30 reference images.')
+  if (videos.length > 10) throw new Error('Seedance accepts up to 10 reference videos.')
+  if ((input.audio?.length || 0) > 10)
+    throw new Error('Seedance accepts up to 10 voice references.')
+  if (input.firstFrame && images.length > 1) {
+    throw new Error('Seedance accepts one first-frame image per image-to-video request.')
   }
-  if (input.image) {
-    payload.image = await providerMediaUri(input.image, 'image', 5 * 1024 * 1024)
+  if (input.firstFrame && (videos.length || input.audio?.length)) {
+    throw new Error('Seedance cannot combine a first-frame image with reference videos or audio.')
   }
-  if (input.video) {
-    payload.reference_videos = [await providerMediaUri(input.video, 'video', 5 * 1024 * 1024)]
+  if (input.audio?.length && !images.length && !videos.length) {
+    throw new Error(
+      'Seedance needs an image or video reference when a voice reference is connected.',
+    )
+  }
+  if (input.firstFrame && images[0]) {
+    payload.image = await providerMediaUri(images[0], 'image', 5 * 1024 * 1024)
+  } else if (images.length) {
+    payload.reference_images = await Promise.all(
+      images.map((image) => providerMediaUri(image, 'image', 5 * 1024 * 1024)),
+    )
+  }
+  if (videos.length) {
+    payload.reference_videos = await Promise.all(
+      videos.map((video) => providerMediaUri(video, 'video', 5 * 1024 * 1024)),
+    )
+  }
+  if (input.audio?.length) {
+    payload.reference_audios = await Promise.all(
+      input.audio.map((audio) => providerMediaUri(audio, 'audio', 50 * 1024 * 1024)),
+    )
   }
 
   const deadline = deadlineFor(input.timeoutMs)
@@ -272,9 +309,29 @@ async function runGeminiOmni(input: VideoGenerationInput): Promise<VideoGenerati
   const apiKey = requireKey('APP_GEMINI_API_KEY')
   const deadline = deadlineFor(input.timeoutMs)
   const parts: Array<Record<string, unknown>> = []
-  if (input.image) {
-    const reference = await imageData(input.image)
+  const images = input.images?.length ? input.images : input.image ? [input.image] : []
+  const videos = input.videos?.length ? input.videos : input.video ? [input.video] : []
+  for (const image of images) {
+    const reference = await imageData(image)
     parts.push({ type: 'image', data: reference.base64, mime_type: reference.mimeType })
+  }
+  for (const video of videos) {
+    const reference = await mediaData(video, 50 * 1024 * 1024, 'video')
+    if (!reference.mimeType.startsWith('video/')) {
+      throw new Error('Video references must be video files.')
+    }
+    parts.push({ type: 'video', data: reference.base64, mime_type: reference.mimeType })
+  }
+  for (const audio of input.audio || []) {
+    const reference = await mediaData(audio, 50 * 1024 * 1024, 'audio')
+    if (!reference.mimeType.startsWith('audio/')) {
+      throw new Error('Voice references must be audio files.')
+    }
+    parts.push({
+      type: 'audio',
+      data: reference.base64,
+      mime_type: reference.mimeType === 'audio/mp4' ? 'audio/m4a' : reference.mimeType,
+    })
   }
   parts.push({ type: 'text', text: input.prompt })
 
@@ -334,6 +391,7 @@ async function runGeminiOmni(input: VideoGenerationInput): Promise<VideoGenerati
 }
 
 async function runVeo(input: VideoGenerationInput): Promise<VideoGenerationResult> {
+  if (input.audio?.length) throw new Error('Veo does not support voice reference inputs.')
   const apiKey = requireKey('APP_GEMINI_API_KEY')
   const deadline = deadlineFor(input.timeoutMs)
   const instance: Record<string, unknown> = { prompt: input.prompt }
@@ -413,6 +471,7 @@ const runwayRatios: Record<string, string> = {
 }
 
 async function runRunway(input: VideoGenerationInput): Promise<VideoGenerationResult> {
+  if (input.audio?.length) throw new Error('Runway does not support voice reference inputs.')
   const apiKey = requireKey('RUNWAYML_API_SECRET')
   const deadline = deadlineFor(input.timeoutMs)
   const image = input.image
