@@ -4,6 +4,8 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-08
+
 ### [Added]
 
 - Public app accounts, owner-scoped workflows, assets, prompts, settings, and Studio history, with encrypted write-only provider credentials and admin-managed storage quotas.
@@ -19,6 +21,9 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 - New video generation nodes and the video starter template use Muse2API by default.
 - ChatGPT2API is the default image provider for new Generate Image nodes, with server-side endpoint and API key configuration.
 - Text and prompt input cards can be edited directly on the workflow canvas.
+- Image Studio and image nodes support custom resolution, width and height, and generated image count; Video Studio accepts custom durations.
+- Generator actions can add image, video, and voice reference nodes, with Seedance and Gemini Omni accepting multimodal references.
+- Image nodes add mask painting, crop, upscale, detail preview, and toolbar customization; the workspace panel lists only canvas nodes and shares one combined toolbar for editing and zoom controls.
 
 ### [Fixed]
 
@@ -27,6 +32,8 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 - The Docs route uses the shared navigation and is reachable from the workspace sidebar.
 - Payload uploads persist in the Docker volume across app restarts and resolve previews through the local media route.
 - The selected image provider remains selected when its default model changes.
+- Video input nodes preserve the uploaded video's actual aspect ratio.
+- M4A uploads are normalized before media signature validation.
 
 ## Package history archive
 
