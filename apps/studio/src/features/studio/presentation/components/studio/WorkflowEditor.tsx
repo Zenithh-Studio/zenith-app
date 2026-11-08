@@ -6946,14 +6946,31 @@ function MediaConfiguration({
   const imageResolution = String(config.resolution || '1k')
   const imageAspectRatio = String(config.aspectRatio || '1:1')
   const imageDimensions = readImageDimensions(config.size, imageResolution, imageAspectRatio)
-  const [imageWidthDraft, setImageWidthDraft] = useState(String(imageDimensions.width))
-  const [imageHeightDraft, setImageHeightDraft] = useState(String(imageDimensions.height))
-  const [imageCountDraft, setImageCountDraft] = useState(String(normalizeImageCount(config.count)))
-  useEffect(() => {
-    setImageWidthDraft(String(imageDimensions.width))
-    setImageHeightDraft(String(imageDimensions.height))
-  }, [imageDimensions.height, imageDimensions.width])
-  useEffect(() => setImageCountDraft(String(normalizeImageCount(config.count))), [config.count])
+  const imageDimensionsKey = JSON.stringify([config.size, imageResolution, imageAspectRatio])
+  const [imageSizeDraftState, setImageSizeDraftState] = useState(() => ({
+    key: imageDimensionsKey,
+    width: String(imageDimensions.width),
+    height: String(imageDimensions.height),
+  }))
+  const imageSizeDraft =
+    imageSizeDraftState.key === imageDimensionsKey
+      ? imageSizeDraftState
+      : {
+          key: imageDimensionsKey,
+          width: String(imageDimensions.width),
+          height: String(imageDimensions.height),
+        }
+  const imageWidthDraft = imageSizeDraft.width
+  const imageHeightDraft = imageSizeDraft.height
+  const normalizedImageCount = normalizeImageCount(config.count)
+  const [imageCountDraftState, setImageCountDraftState] = useState(() => ({
+    count: normalizedImageCount,
+    value: String(normalizedImageCount),
+  }))
+  const imageCountDraft =
+    imageCountDraftState.count === normalizedImageCount
+      ? imageCountDraftState.value
+      : String(normalizedImageCount)
   const ratios = imageAspectRatios
   return (
     <div className="space-y-4">
@@ -7194,7 +7211,11 @@ function MediaConfiguration({
                   value={imageWidthDraft}
                   onChange={(event) => {
                     const value = event.target.value
-                    setImageWidthDraft(value)
+                    setImageSizeDraftState({
+                      key: imageDimensionsKey,
+                      width: value,
+                      height: imageHeightDraft,
+                    })
                     const width = Math.floor(Number(value))
                     if (width > 0) onChange('size', `${width}x${imageDimensions.height}`)
                   }}
@@ -7211,7 +7232,11 @@ function MediaConfiguration({
                   value={imageHeightDraft}
                   onChange={(event) => {
                     const value = event.target.value
-                    setImageHeightDraft(value)
+                    setImageSizeDraftState({
+                      key: imageDimensionsKey,
+                      width: imageWidthDraft,
+                      height: value,
+                    })
                     const height = Math.floor(Number(value))
                     if (height > 0) onChange('size', `${imageDimensions.width}x${height}`)
                   }}
@@ -7231,7 +7256,7 @@ function MediaConfiguration({
                   type="button"
                   aria-pressed={normalizeImageCount(config.count) === count}
                   onClick={() => {
-                    setImageCountDraft(String(count))
+                    setImageCountDraftState({ count, value: String(count) })
                     onChange('count', count)
                   }}
                   className={`h-8 rounded-lg border px-2.5 text-[10px] font-medium ${normalizeImageCount(config.count) === count ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-500'}`}
@@ -7247,12 +7272,13 @@ function MediaConfiguration({
                 value={imageCountDraft}
                 onChange={(event) => {
                   const value = event.target.value
-                  setImageCountDraft(value)
-                  if (value) onChange('count', normalizeImageCount(value))
+                  const count = value ? normalizeImageCount(value) : normalizedImageCount
+                  setImageCountDraftState({ count, value })
+                  if (value) onChange('count', count)
                 }}
                 onBlur={() => {
                   const count = normalizeImageCount(imageCountDraft)
-                  setImageCountDraft(String(count))
+                  setImageCountDraftState({ count, value: String(count) })
                   onChange('count', count)
                 }}
                 className="h-8 w-16 rounded-lg border border-zinc-200 px-2 text-center text-[10px] font-normal text-zinc-700"
