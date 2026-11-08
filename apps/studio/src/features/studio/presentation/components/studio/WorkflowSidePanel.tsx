@@ -161,7 +161,7 @@ export function WorkflowSidePanel({
   return (
     <aside
       aria-label={t('Workflow panel')}
-      className="absolute bottom-20 left-2 top-16 z-40 flex max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-10 lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:shadow-none"
+      className="absolute bottom-20 left-2 top-16 z-40 flex min-h-0 max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl lg:relative lg:bottom-auto lg:left-auto lg:top-auto lg:z-10 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:shadow-none"
       style={{ width: `${width}px` }}
     >
       <div className="grid grid-cols-3 border-b border-zinc-100 p-1.5">
