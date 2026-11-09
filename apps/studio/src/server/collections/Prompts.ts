@@ -23,7 +23,7 @@ export const Prompts: CollectionConfig = {
     { name: 'description', type: 'textarea' },
     { name: 'content', type: 'textarea', required: true },
     { name: 'category', type: 'text' },
-    { name: 'tags', type: 'array', fields: [{ name: 'tag', type: 'text' }] },
+    { name: 'tags', type: 'json', defaultValue: [] },
   ],
   timestamps: true,
 }
