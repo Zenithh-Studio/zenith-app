@@ -15,7 +15,6 @@ import {
   StudioGenerations,
   Tags,
   TextAssets,
-  UserSettings,
   Users,
   Workflows,
 } from '@/server/collections'
@@ -54,7 +53,6 @@ export default buildConfig({
     Admins,
     Users,
     AdminSetup,
-    UserSettings,
     Media,
     SignupAttempts,
     Folders,

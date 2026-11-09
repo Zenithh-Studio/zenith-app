@@ -20,23 +20,16 @@ const providerIds: ProviderId[] = [
 ]
 
 export interface PayloadSettingsApi {
-  find(options: {
-    collection: 'user-settings'
+  findByID(options: {
+    collection: 'users'
+    id: string | number
     overrideAccess: false
     depth: 0
-    limit: 1
-    where: Record<string, unknown>
-    req: { user: AuthenticatedUser; context?: Record<string, unknown> }
-  }): Promise<{ docs: unknown[] }>
-  create(options: {
-    collection: 'user-settings'
-    overrideAccess: false
-    data: Record<string, unknown>
     req: { user: AuthenticatedUser; context?: Record<string, unknown> }
   }): Promise<unknown>
   update(options: {
-    collection: 'user-settings'
-    id: string
+    collection: 'users'
+    id: string | number
     overrideAccess: false
     data: Record<string, unknown>
     req: { user: AuthenticatedUser; context?: Record<string, unknown> }
@@ -44,7 +37,7 @@ export interface PayloadSettingsApi {
 }
 
 type SettingsRecord = {
-  id: string
+  id: string | number
   locale?: 'en' | 'vi'
   modelDefaults?: Record<string, unknown>
   imagePreferences?: Record<string, unknown>
@@ -55,15 +48,14 @@ type SettingsRecord = {
 }
 
 async function findSettings(payload: PayloadSettingsApi, user: AuthenticatedUser) {
-  const { docs } = await payload.find({
-    collection: 'user-settings',
+  if (user.collection !== 'users') return undefined
+  return (await payload.findByID({
+    collection: 'users',
+    id: user.id,
     overrideAccess: false,
     depth: 0,
-    limit: 1,
-    where: { owner: { equals: user.id } },
     req: { user, context: { providerSettingsRuntime: true } },
-  })
-  return docs[0] as SettingsRecord | undefined
+  })) as SettingsRecord
 }
 
 export async function readUserSettings(payload: PayloadSettingsApi, user: AuthenticatedUser) {
@@ -105,19 +97,12 @@ export async function updateUserSettings(
   >,
 ) {
   const existing = await findSettings(payload, user)
-  if (existing) {
-    return payload.update({
-      collection: 'user-settings',
-      id: existing.id,
-      overrideAccess: false,
-      data: updates as Record<string, unknown>,
-      req: { user },
-    })
-  }
-  return payload.create({
-    collection: 'user-settings',
+  if (!existing) throw new Error('Only app users can update their settings.')
+  return payload.update({
+    collection: 'users',
+    id: existing.id,
     overrideAccess: false,
-    data: { ...updates, owner: user.id },
+    data: updates as Record<string, unknown>,
     req: { user },
   })
 }
@@ -128,8 +113,12 @@ export async function updateProviderCredential(
   provider: ProviderId,
   update: { apiKey?: string | null; baseUrl?: string | null },
 ) {
+  if (user.collection !== 'users') {
+    throw new Error('Only app users can update provider settings.')
+  }
   const existing = await findSettings(payload, user)
-  const credentials = { ...(existing?.providerCredentials || {}) }
+  if (!existing) throw new Error('The app user could not be found.')
+  const credentials = { ...(existing.providerCredentials || {}) }
   const current = { ...(credentials[provider] || {}) }
   if (update.apiKey !== undefined) {
     const key = update.apiKey?.trim()
@@ -145,22 +134,13 @@ export async function updateProviderCredential(
   else delete credentials[provider]
 
   const data = { providerCredentials: credentials }
-  if (existing) {
-    await payload.update({
-      collection: 'user-settings',
-      id: existing.id,
-      overrideAccess: false,
-      data,
-      req: { user, context: { providerSettingsRuntime: true } },
-    })
-  } else {
-    await payload.create({
-      collection: 'user-settings',
-      overrideAccess: false,
-      data: { ...data, owner: user.id },
-      req: { user, context: { providerSettingsRuntime: true } },
-    })
-  }
+  await payload.update({
+    collection: 'users',
+    id: existing.id,
+    overrideAccess: false,
+    data,
+    req: { user, context: { providerSettingsRuntime: true } },
+  })
 }
 
 export async function loadProviderCredentials(
