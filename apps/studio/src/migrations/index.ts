@@ -4,6 +4,7 @@ import * as migration_20261107_131639_big_update_user_data_and_studio from './20
 import * as migration_20261107_161710_signup_attempts_collection from './20261107_161710_signup_attempts_collection'
 import * as migration_20261107_162813_executions_workflow_optional from './20261107_162813_executions_workflow_optional'
 import * as migration_20261107_165136_execution_retry_links from './20261107_165136_execution_retry_links'
+import * as migration_20261109_234410_compact_settings_and_cleanup_versions from './20261109_234410_compact_settings_and_cleanup_versions'
 
 export const migrations = [
   {
@@ -35,5 +36,10 @@ export const migrations = [
     up: migration_20261107_165136_execution_retry_links.up,
     down: migration_20261107_165136_execution_retry_links.down,
     name: '20261107_165136_execution_retry_links',
+  },
+  {
+    up: migration_20261109_234410_compact_settings_and_cleanup_versions.up,
+    down: migration_20261109_234410_compact_settings_and_cleanup_versions.down,
+    name: '20261109_234410_compact_settings_and_cleanup_versions',
   },
 ]
