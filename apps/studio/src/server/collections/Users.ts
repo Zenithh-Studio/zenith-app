@@ -1,7 +1,8 @@
 import type { CollectionConfig, FieldAccess } from 'payload'
 import { isAppAdmin, isAppUser } from './access'
 
-const settingsRuntimeAccess: FieldAccess = ({ req }) => req.context?.providerSettingsRuntime === true
+const settingsRuntimeAccess: FieldAccess = ({ req }) =>
+  req.context?.providerSettingsRuntime === true
 
 export const Users: CollectionConfig = {
   slug: 'users',
