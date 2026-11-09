@@ -6,6 +6,8 @@ Migration `20261107_161710_signup_attempts_collection` adds the persisted signup
 
 The workflow relationship migration also changes the versions table relationship to nullable. When a workflow is deleted, PostgreSQL sets its execution foreign key to null while keeping the execution's snapshot, node records, and logs. Rolling that migration back can fail if any detached execution exists; preserve the additive schema and roll application code forward in that case. Do not restore the pre-update database after users have created new app data unless a full restore is explicitly intended.
 
+Migration `20261109_234410_compact_settings_and_cleanup_versions` moves user preferences and encrypted provider credentials into the user record, and stores prompt tag arrays as JSONB. It verifies the settings, credentials, and tag backfills before dropping their source tables. It also removes 26 legacy Payload version tables that are not enabled in the current collection configuration. Execution, workflow, generation, media, and current user records remain intact. This migration is irreversible for Payload version history; take a database backup before deployment, and use that backup if recovery of the removed version history is required.
+
 ## Existing records
 
 Records created before owner isolation have a null owner after migration. They remain visible to Payload administrators, while app users cannot see them. A Payload administrator can review each legacy collection and assign the `owner` relationship to the appropriate app account before that user needs access. Do not assign every legacy record to the first account without verifying who should own it.
