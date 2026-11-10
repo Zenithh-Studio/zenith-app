@@ -1,4 +1,3 @@
-import { withPayload } from '@payloadcms/next/withPayload'
 import type { NextConfig } from 'next'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,9 +20,6 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingRoot: monorepoRoot,
   output: 'standalone',
-  outputFileTracingIncludes: {
-    '/api/[...slug]': ['../../node_modules/.pnpm/strtok3@*/node_modules/strtok3/lib/**/*'],
-  },
   transpilePackages: ['@znith/contracts', '@znith/utils'],
   enablePrerenderSourceMaps: false,
   experimental: {
@@ -31,4 +27,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default withPayload(nextConfig, { devBundleServerPackages: false })
+export default nextConfig

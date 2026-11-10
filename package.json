@@ -15,9 +15,6 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
-    "generate:importmap": "pnpm --filter @znith/studio generate:importmap",
-    "generate:types": "pnpm --filter @znith/studio generate:types",
-    "payload": "pnpm --filter @znith/studio payload",
     "version:check": "node scripts/check-version-sync.mjs",
     "prepare": "husky"
   },

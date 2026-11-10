@@ -5,12 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-cli.mjs next dev",
-    "build": "node scripts/run-cli.mjs payload build",
+    "build": "node scripts/run-cli.mjs next build",
     "start": "node scripts/run-cli.mjs next start",
-    "typecheck": "tsc --noEmit --pretty false -p tsconfig.json",
-    "generate:importmap": "node scripts/run-cli.mjs payload generate:importmap",
-    "generate:types": "node scripts/run-cli.mjs payload generate:types",
-    "payload": "node scripts/run-cli.mjs payload"
+    "typecheck": "tsc --noEmit --pretty false -p tsconfig.json"
   },
   "dependencies": {
     "@payloadcms/db-postgres": "4.0.0-beta.4",
