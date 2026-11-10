@@ -1,7 +1,14 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import Image from 'next/image'
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent,
+} from 'react'
 import {
   Brush,
   Check,
@@ -188,7 +195,7 @@ export function ImageUtilitiesDialog({
                   : action === 'angle'
                     ? { action, assetId, direction, prompt }
                     : { action, assetId, prompt }
-      const response = await fetch('/api/studio/image-tools', {
+      const response = await studioFetch('/api/studio/image-tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -298,7 +305,7 @@ export function ImageUtilitiesDialog({
                 sizes="(max-width: 1024px) 100vw, 65vw"
                 unoptimized
                 draggable={false}
-                onLoad={(event) => {
+                onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
                   const { naturalWidth, naturalHeight } = event.currentTarget
                   if (naturalWidth > 0 && naturalHeight > 0) {
                     setImageRatio(naturalWidth / naturalHeight)
@@ -455,7 +462,7 @@ export function ImageUtilitiesDialog({
                           disabled={!description.trim() || descriptionSaved}
                           onClick={async () => {
                             try {
-                              const response = await fetch('/api/studio/text-assets', {
+                              const response = await studioFetch('/api/studio/text-assets', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({

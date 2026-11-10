@@ -1,6 +1,7 @@
 'use client'
 
-import { createContext, useCallback, useContext, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { getRecord } from '@/lib/studio-indexed-db'
 
 export type Locale = 'en' | 'vi'
 
@@ -60,10 +61,10 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.providerHint.gemini': 'Gemini text, image and video models',
     'settings.providerHint.replicate': 'Hosted image and video models',
     'settings.providerHint.runway': 'Runway video generation',
-    'settings.providerHint.chatgpt2api': 'Admin-managed shared image gateway',
-    'settings.providerHint.muse2api': 'Admin-managed shared video gateway',
+    'settings.providerHint.chatgpt2api': 'Image generation through your ChatGPT2API gateway',
+    'settings.providerHint.muse2api': 'Video generation through your Muse2API gateway',
     'settings.providers': 'Provider credentials',
-    'settings.providerHelp': 'Keys are encrypted on the server and are write-only after saving.',
+    'settings.providerHelp': 'Keys are stored locally in this browser.',
     'settings.key': 'API key',
     'settings.endpoint': 'Endpoint URL (optional)',
     'settings.endpointHelp': 'Use an HTTPS endpoint on the public internet.',
@@ -143,10 +144,10 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.providerHint.gemini': 'Model văn bản, hình ảnh và video của Gemini',
     'settings.providerHint.replicate': 'Các model hình ảnh và video được lưu trữ',
     'settings.providerHint.runway': 'Tạo video bằng Runway',
-    'settings.providerHint.chatgpt2api': 'Cổng hình ảnh dùng chung do quản trị viên quản lý',
-    'settings.providerHint.muse2api': 'Cổng video dùng chung do quản trị viên quản lý',
+    'settings.providerHint.chatgpt2api': 'Tạo ảnh qua cổng ChatGPT2API của bạn',
+    'settings.providerHint.muse2api': 'Tạo video qua cổng Muse2API của bạn',
     'settings.providers': 'Thông tin provider',
-    'settings.providerHelp': 'Key được mã hóa trên server và chỉ ghi sau khi lưu.',
+    'settings.providerHelp': 'Key được lưu cục bộ trong trình duyệt này.',
     'settings.key': 'API key',
     'settings.endpoint': 'URL endpoint (không bắt buộc)',
     'settings.endpointHelp': 'Dùng endpoint HTTPS công khai trên Internet.',
@@ -796,7 +797,30 @@ export function translateMessage(
     : message
 }
 
-export function LocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
+export function LocaleProvider({
+  locale: initialLocale,
+  children,
+}: {
+  locale: Locale
+  children: ReactNode
+}) {
+  const [locale, setLocale] = useState<Locale>(initialLocale)
+  useEffect(() => {
+    let active = true
+    void getRecord('settings', 'current')
+      .then((settings) => {
+        if (!active) return
+        const savedLocale = settings?.locale
+        if (savedLocale === 'en' || savedLocale === 'vi') {
+          setLocale(savedLocale)
+          document.documentElement.lang = savedLocale
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
   return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>
 }
 

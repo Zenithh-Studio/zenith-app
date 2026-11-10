@@ -1,5 +1,9 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+import { getRecord, updateRecord } from '@/lib/studio-indexed-db'
+import type { StudioRecord } from '@/lib/studio-indexed-db'
+
 import {
   addEdge,
   Background,
@@ -182,47 +186,101 @@ const defaultNodeToolbarPreferences: NodeToolbarPreferences = {
 }
 const defaultNodeToolbarPreferencesSnapshot = JSON.stringify(defaultNodeToolbarPreferences)
 const nodeToolbarPreferenceSubscribers = new Set<() => void>()
+let currentNodeToolbarPreferences = defaultNodeToolbarPreferences
+let nodeToolbarPreferencesLoad: Promise<void> | undefined
 
-function readNodeToolbarPreferences(): NodeToolbarPreferences {
-  if (typeof window === 'undefined') return defaultNodeToolbarPreferences
-  try {
-    let hiddenQuickActions: string[] = []
-    const saved = JSON.parse(
-      window.localStorage.getItem('zenith:node-toolbar-hidden-actions') || '[]',
-    )
-    if (Array.isArray(saved)) {
-      hiddenQuickActions = saved.filter((item): item is string => typeof item === 'string')
+function workflowEditorPreferences(settings: StudioRecord | null) {
+  const uiPreferences = settings?.uiPreferences
+  if (!uiPreferences || typeof uiPreferences !== 'object') return {}
+  const workflowEditor = (uiPreferences as Record<string, unknown>).workflowEditor
+  return workflowEditor && typeof workflowEditor === 'object'
+    ? (workflowEditor as Record<string, unknown>)
+    : {}
+}
+
+function publishNodeToolbarPreferences(preferences: NodeToolbarPreferences) {
+  currentNodeToolbarPreferences = preferences
+  nodeToolbarPreferenceSubscribers.forEach((subscriber) => subscriber())
+}
+
+function loadNodeToolbarPreferences() {
+  if (nodeToolbarPreferencesLoad) return nodeToolbarPreferencesLoad
+  nodeToolbarPreferencesLoad = (async () => {
+    const settings = await getRecord('settings', 'current')
+    const saved = workflowEditorPreferences(settings).nodeToolbar
+    if (saved && typeof saved === 'object') {
+      const value = saved as Partial<NodeToolbarPreferences>
+      publishNodeToolbarPreferences({
+        showActionLabels: value.showActionLabels === true,
+        hiddenQuickActions: Array.isArray(value.hiddenQuickActions)
+          ? value.hiddenQuickActions.filter((item): item is string => typeof item === 'string')
+          : [],
+      })
+      return
     }
-    return {
+
+    if (typeof window === 'undefined') return
+    const hasLegacy =
+      window.localStorage.getItem('zenith:node-toolbar-labels') !== null ||
+      window.localStorage.getItem('zenith:node-toolbar-hidden-actions') !== null
+    if (!hasLegacy) return
+    let hiddenQuickActions: string[] = []
+    try {
+      const legacy = JSON.parse(
+        window.localStorage.getItem('zenith:node-toolbar-hidden-actions') || '[]',
+      )
+      if (Array.isArray(legacy))
+        hiddenQuickActions = legacy.filter((item): item is string => typeof item === 'string')
+    } catch {
+      hiddenQuickActions = []
+    }
+    const preferences = {
       showActionLabels: window.localStorage.getItem('zenith:node-toolbar-labels') === 'true',
       hiddenQuickActions,
     }
-  } catch {
-    return defaultNodeToolbarPreferences
-  }
+    publishNodeToolbarPreferences(preferences)
+    await saveWorkflowEditorPreferences({ nodeToolbar: preferences })
+    window.localStorage.removeItem('zenith:node-toolbar-labels')
+    window.localStorage.removeItem('zenith:node-toolbar-hidden-actions')
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      nodeToolbarPreferencesLoad = undefined
+    })
+  return nodeToolbarPreferencesLoad
 }
 
 function getNodeToolbarPreferencesSnapshot() {
-  return JSON.stringify(readNodeToolbarPreferences())
+  return JSON.stringify(currentNodeToolbarPreferences)
 }
 
 function subscribeNodeToolbarPreferences(onChange: () => void) {
   nodeToolbarPreferenceSubscribers.add(onChange)
-  const onStorage = () => onChange()
-  window.addEventListener('storage', onStorage)
   return () => {
     nodeToolbarPreferenceSubscribers.delete(onChange)
-    window.removeEventListener('storage', onStorage)
   }
 }
 
+async function saveWorkflowEditorPreferences(preferences: Record<string, unknown>) {
+  await updateRecord<StudioRecord>('settings', 'current', (stored) => {
+    const current = stored || { id: 'current' }
+    const uiPreferences =
+      current.uiPreferences && typeof current.uiPreferences === 'object'
+        ? (current.uiPreferences as Record<string, unknown>)
+        : {}
+    const workflowEditor = workflowEditorPreferences(current)
+    return {
+      ...current,
+      id: 'current',
+      uiPreferences: { ...uiPreferences, workflowEditor: { ...workflowEditor, ...preferences } },
+      updatedAt: new Date().toISOString(),
+    }
+  })
+}
+
 function saveNodeToolbarPreferences(preferences: NodeToolbarPreferences) {
-  window.localStorage.setItem('zenith:node-toolbar-labels', String(preferences.showActionLabels))
-  window.localStorage.setItem(
-    'zenith:node-toolbar-hidden-actions',
-    JSON.stringify(preferences.hiddenQuickActions),
-  )
-  nodeToolbarPreferenceSubscribers.forEach((subscriber) => subscriber())
+  publishNodeToolbarPreferences(preferences)
+  void saveWorkflowEditorPreferences({ nodeToolbar: preferences }).catch(() => undefined)
 }
 
 type MediaOutputVersion = {
@@ -692,6 +750,9 @@ function NodeActionToolbar({
     getNodeToolbarPreferencesSnapshot,
     () => defaultNodeToolbarPreferencesSnapshot,
   )
+  useEffect(() => {
+    void loadNodeToolbarPreferences()
+  }, [])
   const nodeToolbarPreferences = JSON.parse(toolbarPreferencesSnapshot) as NodeToolbarPreferences
   const { showActionLabels, hiddenQuickActions } = nodeToolbarPreferences
   const [copyPromptMessage, setCopyPromptMessage] = useState('')
@@ -921,7 +982,7 @@ function NodeActionToolbar({
       form.set('captureMode', frameMode)
       form.set('timestampSeconds', String(timestampSeconds))
       form.set('file', new File([blob], filename, { type: 'image/png' }))
-      const response = await fetch('/api/studio/video-frames', { method: 'POST', body: form })
+      const response = await studioFetch('/api/studio/video-frames', { method: 'POST', body: form })
       const body = (await response.json()) as {
         media?: {
           id: string
@@ -992,7 +1053,7 @@ function NodeActionToolbar({
     if (!outputText) return
     setTextAssetSave({ value: outputText, status: 'saving' })
     try {
-      const response = await fetch('/api/studio/text-assets', {
+      const response = await studioFetch('/api/studio/text-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3152,6 +3213,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [paletteSearch, setPaletteSearch] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteWidth, setPaletteWidth] = useState(280)
+  const [paletteWidthLoaded, setPaletteWidthLoaded] = useState(false)
   const [showMinimap, setShowMinimap] = useState(true)
   const [canvasMode, setCanvasMode] = useState<'select' | 'pan'>('select')
   const [dotBackground, setDotBackground] = useState(true)
@@ -3212,7 +3274,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const nodesInitialized = useNodesInitialized()
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
+    const response = await studioFetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
     const responseBody = await response.json()
     if (!response.ok) return setError(responseBody.error || 'Could not load workflow.')
     const refreshedExecutions = responseBody.executions as ExecutionDocument[]
@@ -3263,7 +3325,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       }
       setError('')
       try {
-        const response = await fetch(`/api/studio/workflows/${workflowId}/status`, {
+        const response = await studioFetch(`/api/studio/workflows/${workflowId}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ executionId: execution.id }),
@@ -3347,7 +3409,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       if (requestInFlight) return
       requestInFlight = true
       try {
-        const response = await fetch(`/api/studio/workflows/${workflowId}`, {
+        const response = await studioFetch(`/api/studio/workflows/${workflowId}`, {
           cache: 'no-store',
         })
         if (!response.ok) return
@@ -3490,7 +3552,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       if (!workflow) return false
       setSaving(true)
       setError('')
-      const response = await fetch(`/api/studio/workflows/${workflowId}`, {
+      const response = await studioFetch(`/api/studio/workflows/${workflowId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3555,7 +3617,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
       try {
         setNotice('')
-        const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
+        const response = await studioFetch(`/api/studio/workflows/${workflowId}/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ targetNodeId, groupId, retryOfExecutionId }),
@@ -3643,7 +3705,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const stopRun = async () => {
     setError('')
     try {
-      const response = await fetch(`/api/studio/workflows/${workflowId}/execute`, {
+      const response = await studioFetch(`/api/studio/workflows/${workflowId}/execute`, {
         method: 'DELETE',
       })
       const body = (await response.json()) as { error?: string }
@@ -3719,21 +3781,44 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   )
 
   useEffect(() => {
+    let active = true
     const frame = window.requestAnimationFrame(() => {
       setZoomPercent(Math.round(getZoom() * 100))
-      const storedWidth = Number(window.localStorage.getItem('zenith:workflow-side-panel-width'))
-      if (Number.isFinite(storedWidth) && storedWidth >= 220 && storedWidth <= 480)
-        setPaletteWidth(storedWidth)
     })
-    return () => window.cancelAnimationFrame(frame)
+    void (async () => {
+      const settings = await getRecord('settings', 'current')
+      let storedWidth = Number(workflowEditorPreferences(settings).sidePanelWidth)
+      if (!Number.isFinite(storedWidth) || storedWidth < 220 || storedWidth > 480) {
+        const legacyWidth = Number(window.localStorage.getItem('zenith:workflow-side-panel-width'))
+        if (Number.isFinite(legacyWidth) && legacyWidth >= 220 && legacyWidth <= 480) {
+          storedWidth = legacyWidth
+          await saveWorkflowEditorPreferences({ sidePanelWidth: Math.round(legacyWidth) })
+          window.localStorage.removeItem('zenith:workflow-side-panel-width')
+        }
+      }
+      if (active && Number.isFinite(storedWidth) && storedWidth >= 220 && storedWidth <= 480) {
+        setPaletteWidth(storedWidth)
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setPaletteWidthLoaded(true)
+      })
+    return () => {
+      active = false
+      window.cancelAnimationFrame(frame)
+    }
   }, [getZoom])
 
   useEffect(() => {
-    window.localStorage.setItem(
-      'zenith:workflow-side-panel-width',
-      String(Math.round(paletteWidth)),
-    )
-  }, [paletteWidth])
+    if (!paletteWidthLoaded) return
+    const timeout = window.setTimeout(() => {
+      void saveWorkflowEditorPreferences({ sidePanelWidth: Math.round(paletteWidth) }).catch(
+        () => undefined,
+      )
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [paletteWidth, paletteWidthLoaded])
 
   const focusSelection = () => {
     const selected = nodes.filter((node) => node.selected)
@@ -4395,7 +4480,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         form.set('file', file)
         form.set('alt', file.name)
         form.set('scope', 'workflow')
-        const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
+        const response = await studioFetch('/api/studio/assets', { method: 'POST', body: form })
         const responseBody = await response.json()
         if (!response.ok || !responseBody.media) {
           failures.push(`${file.name}: ${responseBody.error || 'Could not upload media.'}`)
@@ -5070,7 +5155,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
             onClick={async () => {
               const nextLocale = locale === 'en' ? 'vi' : 'en'
               try {
-                const response = await fetch('/api/studio/settings', {
+                const response = await studioFetch('/api/studio/settings', {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ locale: nextLocale }),
@@ -5346,12 +5431,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                 const width = Math.max(220, Math.min(480, startWidth + event.clientX - startX))
                 setPaletteWidth(width)
               }}
-              onPointerUp={() =>
-                window.localStorage.setItem(
-                  'zenith:workflow-side-panel-width',
-                  String(paletteWidth),
-                )
-              }
               onKeyDown={(event) => {
                 if (event.key === 'ArrowLeft') setPaletteWidth((width) => Math.max(220, width - 16))
                 if (event.key === 'ArrowRight')
@@ -5400,11 +5479,14 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               saveOutputToAssets: async (nodeId, executionId) => {
                 setError('')
                 try {
-                  const response = await fetch(`/api/studio/workflows/${workflowId}/save-output`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nodeId, executionId }),
-                  })
+                  const response = await studioFetch(
+                    `/api/studio/workflows/${workflowId}/save-output`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ nodeId, executionId }),
+                    },
+                  )
                   const body = (await response.json()) as { error?: string }
                   if (!response.ok) {
                     throw new Error(body.error || 'Output could not be saved to Assets.')
@@ -5422,7 +5504,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               saveWorkflowUpload: async (nodeId, assetId) => {
                 setError('')
                 try {
-                  const response = await fetch('/api/studio/assets/save', {
+                  const response = await studioFetch('/api/studio/assets/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ assetId }),

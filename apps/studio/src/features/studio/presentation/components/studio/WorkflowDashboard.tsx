@@ -1,5 +1,7 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -89,7 +91,9 @@ export function WorkflowDashboard() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`/api/studio/workflows?search=${encodeURIComponent(search)}`)
+      const response = await studioFetch(
+        `/api/studio/workflows?search=${encodeURIComponent(search)}`,
+      )
       const responseBody = (await response.json()) as {
         docs?: WorkflowDocument[]
         error?: string
@@ -159,7 +163,7 @@ export function WorkflowDashboard() {
   }
 
   const create = async (templateId: string) => {
-    const response = await fetch('/api/studio/workflows', {
+    const response = await studioFetch('/api/studio/workflows', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ templateId }),
@@ -178,13 +182,13 @@ export function WorkflowDashboard() {
       )
     )
       return
-    const response = await fetch(`/api/studio/workflows/${workflow.id}`, { method: 'DELETE' })
+    const response = await studioFetch(`/api/studio/workflows/${workflow.id}`, { method: 'DELETE' })
     if (!response.ok) return setError(t('Could not delete workflow.'))
     setWorkflows((current) => current.filter((item) => item.id !== workflow.id))
   }
 
   const duplicate = async (workflow: WorkflowDocument) => {
-    const response = await fetch('/api/studio/workflows', {
+    const response = await studioFetch('/api/studio/workflows', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -203,7 +207,7 @@ export function WorkflowDashboard() {
       current.map((item) => (item.id === workflow.id ? { ...item, status: 'running' } : item)),
     )
     try {
-      const response = await fetch(`/api/studio/workflows/${workflow.id}/execute`, {
+      const response = await studioFetch(`/api/studio/workflows/${workflow.id}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -242,7 +246,7 @@ export function WorkflowDashboard() {
   const importWorkflow = async (file: File) => {
     try {
       const imported = JSON.parse(await file.text()) as WorkflowDocument
-      const response = await fetch('/api/studio/workflows', {
+      const response = await studioFetch('/api/studio/workflows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

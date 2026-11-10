@@ -70,16 +70,9 @@ export function resolveProviderKey(name: string) {
   const provider = providerForEnvName(name)
   const key = provider ? context?.keys?.[provider] : undefined
   if (key) return key
-  if (context && !context.allowServerFallback) {
-    throw new Error(`${provider || 'Provider'} credential is not configured in your Settings.`)
-  }
-  const value = process.env[name]
-  if (!value) {
-    throw new Error(
-      `${name.replace('APP_', '').replace('_API_KEY', '')} is not configured. Set the ${name} server environment variable.`,
-    )
-  }
-  return value
+  throw new Error(
+    `${provider || name.replaceAll('_', ' ')} credential is not configured in Settings.`,
+  )
 }
 
 export function resolveProviderBaseUrl(provider: ProviderId, fallback: string) {

@@ -1,5 +1,7 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import {
   ArrowDownUp,
   Check,
@@ -257,7 +259,7 @@ function TextAssetCard({
     setSaving(true)
     setMessage('')
     try {
-      const response = await fetch('/api/studio/text-assets', {
+      const response = await studioFetch('/api/studio/text-assets', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: asset.id, title, content }),
@@ -395,7 +397,7 @@ export function AssetLibrary() {
       const query = new URLSearchParams({ page: String(page), limit: '40', sort })
       if (search) query.set('search', search)
       if (typeFilter !== 'all') query.set('type', typeFilter)
-      const response = await fetch(`/api/studio/assets?${query}`)
+      const response = await studioFetch(`/api/studio/assets?${query}`)
       const responseBody = await response.json()
       if (response.ok && Array.isArray(responseBody.docs)) {
         setAssets(responseBody.docs)
@@ -440,7 +442,7 @@ export function AssetLibrary() {
         const form = new FormData()
         form.set('file', file)
         form.set('alt', file.name)
-        const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
+        const response = await studioFetch('/api/studio/assets', { method: 'POST', body: form })
         const responseBody = await response.json()
         if (!response.ok) failures.push(`${file.name}: ${responseBody.error || 'Upload failed.'}`)
         else uploadedCount += 1
@@ -480,7 +482,7 @@ export function AssetLibrary() {
         .filter((id) => id.startsWith('text:'))
         .map((id) => id.slice('text:'.length))
       if (mediaIds.length) {
-        const response = await fetch('/api/studio/assets', {
+        const response = await studioFetch('/api/studio/assets', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ids: mediaIds }),
@@ -492,7 +494,7 @@ export function AssetLibrary() {
         }
       }
       for (const id of textIds) {
-        const response = await fetch('/api/studio/text-assets', {
+        const response = await studioFetch('/api/studio/text-assets', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id }),
@@ -532,7 +534,7 @@ export function AssetLibrary() {
     setSavingText(true)
     setError('')
     try {
-      const response = await fetch('/api/studio/text-assets', {
+      const response = await studioFetch('/api/studio/text-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: textTitle, content: textContent }),

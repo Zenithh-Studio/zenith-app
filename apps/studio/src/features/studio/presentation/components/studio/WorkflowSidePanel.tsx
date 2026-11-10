@@ -1,5 +1,7 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import { useEffect, useState } from 'react'
 import {
   BookOpenText,
@@ -99,7 +101,10 @@ export function WorkflowSidePanel({
       if (search.trim()) query.set('search', search.trim())
       setLoading(true)
       setError('')
-      void fetch(`/api/studio/assets?${query}`, { cache: 'no-store', signal: controller.signal })
+      void studioFetch(`/api/studio/assets?${query}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
         .then(async (response) => {
           const body = (await response.json()) as { docs?: WorkflowAsset[]; error?: string }
           if (!response.ok) throw new Error(body.error || 'Assets could not be loaded.')
@@ -127,7 +132,10 @@ export function WorkflowSidePanel({
       if (search.trim()) query.set('search', search.trim())
       setLoading(true)
       setError('')
-      void fetch(`/api/studio/prompts?${query}`, { cache: 'no-store', signal: controller.signal })
+      void studioFetch(`/api/studio/prompts?${query}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
         .then(async (response) => {
           const body = (await response.json()) as { docs?: WorkflowPrompt[]; error?: string }
           if (!response.ok) throw new Error(body.error || 'Prompts could not be loaded.')

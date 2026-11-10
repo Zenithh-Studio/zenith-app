@@ -1,5 +1,7 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import Image from 'next/image'
 import { useSearchParams } from 'next/navigation'
@@ -145,26 +147,35 @@ function Modal({
   )
 }
 
-export function MediaStudioPage({
-  modality,
-  initialPreferences,
-  isAdmin,
-}: {
-  modality: Modality
-  initialPreferences: StudioPreferences
-  isAdmin: boolean
-}) {
+export function MediaStudioPage({ modality }: { modality: Modality }) {
   const { locale, t } = useLocale()
   const searchParams = useSearchParams()
   const title = t(modality === 'image' ? 'Image Studio' : 'Video Studio')
+  const initialPreferences: StudioPreferences =
+    modality === 'image'
+      ? {
+          provider: '',
+          model: '',
+          aspectRatio: '1:1',
+          quality: 'standard',
+          duration: 5,
+          resolution: '1k',
+          size: '1024x1024',
+          count: 1,
+        }
+      : {
+          provider: '',
+          model: '',
+          aspectRatio: '16:9',
+          quality: 'standard',
+          duration: 5,
+          resolution: '720p',
+          size: '1024x1024',
+          count: 1,
+        }
   const visibleProviders = useMemo(
-    () =>
-      providersFor(modality).filter(
-        (provider) =>
-          Boolean(provider.models[modality]?.length) &&
-          (isAdmin || !['chatgpt2api', 'muse2api'].includes(provider.id)),
-      ),
-    [isAdmin, modality],
+    () => providersFor(modality).filter((provider) => Boolean(provider.models[modality]?.length)),
+    [modality],
   )
   const [provider, setProvider] = useState(() =>
     visibleProviders.some((item) => item.id === initialPreferences.provider)
@@ -232,12 +243,55 @@ export function MediaStudioPage({
   const selectedAsset = selectedAssets[selectedOutputIndex] || selectedAssets[0]
   const selectedUrl = selectedAsset ? assetUrl(selectedAsset) : ''
 
+  useEffect(() => {
+    let active = true
+    void studioFetch('/api/studio/settings')
+      .then((response) => response.json())
+      .then(
+        (body: {
+          settings?: {
+            modelDefaults?: Record<string, unknown>
+            imagePreferences?: Record<string, unknown>
+            videoPreferences?: Record<string, unknown>
+          }
+        }) => {
+          if (!active || !body.settings) return
+          const savedModel = String(body.settings.modelDefaults?.[modality] || '')
+          const candidate =
+            visibleProviders.find((item) => item.models[modality]?.includes(savedModel)) ||
+            visibleProviders[0]
+          if (candidate) {
+            setProvider(candidate.id)
+            setModel(
+              candidate.models[modality]?.includes(savedModel)
+                ? savedModel
+                : candidate.models[modality]?.[0] || '',
+            )
+          }
+          const preferences =
+            modality === 'image' ? body.settings.imagePreferences : body.settings.videoPreferences
+          if (preferences?.aspectRatio) setAspectRatio(String(preferences.aspectRatio))
+          if (modality === 'image') {
+            if (preferences?.quality) setQuality(String(preferences.quality))
+            if (preferences?.count) setImageCount(normalizeImageCount(Number(preferences.count)))
+          } else {
+            if (preferences?.duration) setDuration(Number(preferences.duration))
+            if (preferences?.resolution) setResolution(String(preferences.resolution))
+          }
+        },
+      )
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [modality, visibleProviders])
+
   const checkSelectedStatus = async (generation = selected) => {
     if (!generation?.providerTaskId || checkingStatus) return
     setCheckingStatus(true)
     setError('')
     try {
-      const response = await fetch(
+      const response = await studioFetch(
         `/api/studio/generations/${encodeURIComponent(generation.id)}/status`,
         { method: 'POST' },
       )
@@ -259,7 +313,7 @@ export function MediaStudioPage({
 
   useEffect(() => {
     let active = true
-    void fetch(`/api/studio/generations?modality=${modality}`, { cache: 'no-store' })
+    void studioFetch(`/api/studio/generations?modality=${modality}`, { cache: 'no-store' })
       .then(async (response) => {
         const body = (await response.json()) as { generations?: StudioGeneration[]; error?: string }
         if (!response.ok) throw new Error(t(body.error || 'Could not load generation history.'))
@@ -273,7 +327,7 @@ export function MediaStudioPage({
             ['running', 'pending', 'interrupted'].includes(item.status),
         )
         if (resumable) {
-          void fetch(`/api/studio/generations/${encodeURIComponent(resumable.id)}/status`, {
+          void studioFetch(`/api/studio/generations/${encodeURIComponent(resumable.id)}/status`, {
             method: 'POST',
           })
             .then(async (statusResponse) => {
@@ -308,7 +362,9 @@ export function MediaStudioPage({
     if (!promptId || loadedPromptId.current === promptId) return
     loadedPromptId.current = promptId
     let active = true
-    void fetch(`/api/studio/prompts?id=${encodeURIComponent(promptId)}`, { cache: 'no-store' })
+    void studioFetch(`/api/studio/prompts?id=${encodeURIComponent(promptId)}`, {
+      cache: 'no-store',
+    })
       .then(async (response) => {
         const body = (await response.json()) as { prompt?: { content?: string }; error?: string }
         if (!response.ok || !body.prompt?.content)
@@ -335,7 +391,7 @@ export function MediaStudioPage({
         types.map(async (type) => {
           const query = new URLSearchParams({ type, limit: '40' })
           if (search) query.set('search', search)
-          const response = await fetch(`/api/studio/assets?${query}`, { cache: 'no-store' })
+          const response = await studioFetch(`/api/studio/assets?${query}`, { cache: 'no-store' })
           const body = (await response.json()) as { docs?: StudioAsset[] }
           if (!response.ok) throw new Error('Could not load reference assets.')
           return body.docs || []
@@ -368,7 +424,7 @@ export function MediaStudioPage({
     form.set('alt', reference.name)
     form.set('scope', 'workflow')
     try {
-      const response = await fetch('/api/studio/assets', { method: 'POST', body: form })
+      const response = await studioFetch('/api/studio/assets', { method: 'POST', body: form })
       const body = (await response.json()) as { media?: StudioAsset; error?: string }
       if (!response.ok || !body.media)
         throw new Error(t(body.error || 'Could not upload reference image.'))
@@ -389,7 +445,7 @@ export function MediaStudioPage({
   const saveReferenceAsset = async (assetId: string) => {
     setError('')
     try {
-      const response = await fetch('/api/studio/assets/save', {
+      const response = await studioFetch('/api/studio/assets/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId }),
@@ -417,7 +473,7 @@ export function MediaStudioPage({
 
   const openPromptPicker = async () => {
     try {
-      const response = await fetch('/api/studio/prompts', { cache: 'no-store' })
+      const response = await studioFetch('/api/studio/prompts', { cache: 'no-store' })
       const body = (await response.json()) as {
         docs?: Array<{ id: string; title: string; content: string }>
       }
@@ -447,7 +503,7 @@ export function MediaStudioPage({
     setGenerating(true)
     setError('')
     try {
-      const response = await fetch('/api/studio/generations', {
+      const response = await studioFetch('/api/studio/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(retryOf ? { retryOf } : requestBody()),

@@ -1,21 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
-import path from 'node:path'
 import sharp from 'sharp'
 import { z } from 'zod'
-import { getAppSession, unauthenticatedResponse } from '@/lib/app-auth'
-import { getAssetService } from '@/lib/backend-services'
-import { getPayloadClient } from '@/lib/payload'
 import { withApiLogging } from '@/lib/server-logger'
-import { AssetValidationError } from '@/server/modules/assets'
-import {
-  loadProviderCredentials,
-  type PayloadSettingsApi,
-} from '@/server/modules/providers/user-settings'
+import { AssetValidationError } from '@/server/modules/assets/application/asset-service'
 import {
   resolveProviderKey,
   resolveProviderEndpoint,
   withProviderCredentials,
+  type ProviderCredentials,
 } from '@/server/modules/providers/credential-context'
 import { transformImage } from '@/server/modules/assets/application/image-transforms'
 import { downloadGeneratedMedia } from '@/server/modules/workflows/application/workflow-media-persister'
@@ -23,12 +15,23 @@ import { downloadGeneratedMedia } from '@/server/modules/workflows/application/w
 const maxFileBytes = 50 * 1024 * 1024
 const pollIntervalMs = 15_000
 const maximumTaskWaitMs = 5 * 60 * 1000
+const sourceFields = {
+  assetId: z.string().min(1).max(128),
+  sourceName: z.string().trim().min(1).max(255),
+  sourceAlt: z.string().max(2_000).optional(),
+  credentials: z
+    .object({
+      keys: z.record(z.string(), z.string()).optional(),
+      baseUrls: z.record(z.string(), z.string()).optional(),
+    })
+    .optional(),
+}
 
 const requestSchema = z.discriminatedUnion('action', [
   z
     .object({
+      ...sourceFields,
       action: z.literal('crop'),
-      assetId: z.string().min(1).max(128),
       crop: z
         .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
         .strict(),
@@ -36,48 +39,48 @@ const requestSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('split'),
-      assetId: z.string().min(1).max(128),
       columns: z.number().int().min(2).max(4),
       rows: z.number().int().min(2).max(4),
     })
     .strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('upscale'),
-      assetId: z.string().min(1).max(128),
       scale: z.union([z.literal(2), z.literal(4)]),
       faceEnhance: z.boolean().optional(),
     })
     .strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('super-resolution'),
-      assetId: z.string().min(1).max(128),
       scale: z.union([z.literal(2), z.literal(4)]),
       faceEnhance: z.boolean().optional(),
     })
     .strict(),
-  z.object({ action: z.literal('describe'), assetId: z.string().min(1).max(128) }).strict(),
+  z.object({ ...sourceFields, action: z.literal('describe') }).strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('mask-edit'),
-      assetId: z.string().min(1).max(128),
       prompt: z.string().trim().min(1).max(32_000),
       mask: z.string().min(1).max(6_000_000),
     })
     .strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('variation'),
-      assetId: z.string().min(1).max(128),
       prompt: z.string().trim().min(1).max(32_000),
     })
     .strict(),
   z
     .object({
+      ...sourceFields,
       action: z.literal('angle'),
-      assetId: z.string().min(1).max(128),
       direction: z.enum(['front', 'left', 'right', 'back', 'high', 'low']),
       prompt: z.string().trim().max(4_000).optional(),
     })
@@ -288,15 +291,14 @@ function safeError(error: unknown) {
 }
 
 async function createDerivedImage(request: Request) {
-  const session = await getAppSession(request.headers)
-  if (!session) return unauthenticatedResponse()
-
+  let form: FormData
   let rawBody: unknown
   try {
-    rawBody = await request.json()
+    form = await request.formData()
+    rawBody = JSON.parse(String(form.get('input') || ''))
   } catch {
     return Response.json(
-      { error: 'Submit valid image tool settings.', code: 'INVALID_IMAGE_TOOL' },
+      { error: 'Submit valid image tool settings and source image.', code: 'INVALID_IMAGE_TOOL' },
       { status: 400 },
     )
   }
@@ -308,52 +310,38 @@ async function createDerivedImage(request: Request) {
     )
   }
   const input = parsed.data
-
-  try {
-    const assetService = await getAssetService(session.user)
-    const [asset] = await assetService.findAssetsByIds([input.assetId])
-    if (!asset) return Response.json({ error: 'The source image was not found.' }, { status: 404 })
-    if (!asset.mimeType?.startsWith('image/') || !asset.filename) {
-      return Response.json({ error: 'This tool requires a saved image asset.' }, { status: 415 })
-    }
-    if (Number(asset.filesize) > maxFileBytes) {
-      return Response.json({ error: 'Image files must be 50 MB or smaller.' }, { status: 413 })
-    }
-
-    const uploadRoot = path.resolve(
-      /*turbopackIgnore: true*/
-      process.env.PAYLOAD_UPLOAD_DIR?.trim() || path.resolve(process.cwd(), 'uploads'),
+  const sourceFile = form.get('source')
+  if (!(sourceFile instanceof File)) {
+    return Response.json(
+      { error: 'The source image is unavailable.', code: 'IMAGE_TOOL_FAILED' },
+      { status: 400 },
     )
-    const sourcePath = path.resolve(uploadRoot, path.basename(asset.filename))
-    if (!sourcePath.startsWith(`${uploadRoot}${path.sep}`)) {
-      return Response.json({ error: 'The source image path is invalid.' }, { status: 400 })
-    }
-    const sourceStat = await stat(/*turbopackIgnore: true*/ sourcePath)
-    if (sourceStat.size <= 0 || sourceStat.size > maxFileBytes) {
-      return Response.json(
-        { error: 'The source image is missing or exceeds 50 MB.' },
-        { status: 413 },
-      )
-    }
-    const source = await readFile(/*turbopackIgnore: true*/ sourcePath)
-    if (source.byteLength !== sourceStat.size) {
-      return Response.json(
-        { error: 'The source image could not be read completely.' },
-        { status: 400 },
-      )
-    }
-
+  }
+  if (!sourceFile.type.startsWith('image/')) {
+    return Response.json(
+      { error: 'This tool requires an image file.', code: 'INVALID_IMAGE_TOOL' },
+      { status: 415 },
+    )
+  }
+  if (!sourceFile.size || sourceFile.size > maxFileBytes) {
+    return Response.json(
+      { error: 'Image files must be between 1 byte and 50 MB.', code: 'INVALID_IMAGE_TOOL' },
+      { status: 413 },
+    )
+  }
+  const source = Buffer.from(await sourceFile.arrayBuffer())
+  const credentials: ProviderCredentials = {
+    keys: input.credentials?.keys as ProviderCredentials['keys'],
+    baseUrls: input.credentials?.baseUrls as ProviderCredentials['baseUrls'],
+  }
+  try {
     if (input.action === 'describe') {
       const normalizedSource = await sharp(source)
         .rotate()
         .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 85 })
         .toBuffer()
-      const settings = await loadProviderCredentials(
-        (await getPayloadClient()) as unknown as PayloadSettingsApi,
-        session.user,
-      )
-      const description = await withProviderCredentials(settings, () =>
+      const description = await withProviderCredentials(credentials, () =>
         describeImage(normalizedSource),
       )
       return Response.json(
@@ -383,10 +371,6 @@ async function createDerivedImage(request: Request) {
       input.action === 'variation' ||
       input.action === 'angle'
     ) {
-      const settings = await loadProviderCredentials(
-        (await getPayloadClient()) as unknown as PayloadSettingsApi,
-        session.user,
-      )
       const normalizedSource = await sharp(source).rotate().jpeg({ quality: 90 }).toBuffer()
       if (normalizedSource.byteLength > maxFileBytes) {
         throw new AssetValidationError('The prepared image must be 50 MB or smaller.', 413)
@@ -421,7 +405,7 @@ async function createDerivedImage(request: Request) {
         }[input.direction]
         prompt = `Create a new camera-angle view of the same subject: ${direction}. Preserve the subject identity, materials, lighting, and visual style.${input.prompt ? ` Additional direction: ${input.prompt}` : ''}`
       }
-      const media = await withProviderCredentials(settings, () =>
+      const media = await withProviderCredentials(credentials, () =>
         editImage(normalizedSource, prompt, maskBuffer),
       )
       const metadata = await sharp(media.buffer).metadata()
@@ -475,14 +459,10 @@ async function createDerivedImage(request: Request) {
         },
       ]
     } else if (input.action === 'super-resolution') {
-      const settings = await loadProviderCredentials(
-        (await getPayloadClient()) as unknown as PayloadSettingsApi,
-        session.user,
-      )
-      const media = await withProviderCredentials(settings, () =>
+      const media = await withProviderCredentials(credentials, () =>
         runRealESRGAN(
           source,
-          asset.mimeType || 'image/png',
+          sourceFile.type || 'image/png',
           input.scale,
           input.faceEnhance ?? false,
         ),
@@ -509,19 +489,22 @@ async function createDerivedImage(request: Request) {
       throw new Error('Choose a supported image tool.')
     }
 
-    const derivedInputs = files.map((file, index) => {
+    const outputs = files.map((file, index) => {
       if (!file.size || file.size > maxFileBytes) {
         throw new AssetValidationError('Derived images must be between 1 byte and 50 MB each.', 413)
       }
       return {
-        alt: `${asset.alt || asset.filename} · ${input.action}${files.length > 1 ? ` ${index + 1}` : ''}`,
-        file: { buffer: file.buffer, mimetype: file.mimetype, name: file.name, size: file.size },
+        id: randomUUID(),
+        url: `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
+        filename: file.name,
+        mimeType: file.mimetype,
+        filesize: file.size,
+        alt: `${input.sourceAlt || input.sourceName} · ${input.action}${files.length > 1 ? ` ${index + 1}` : ''}`,
         source: 'derived' as const,
-        derivedFrom: asset.id,
-        derivedMetadata: { ...file.metadata, sourceAsset: asset.filename },
+        derivedFrom: input.assetId,
+        derivedMetadata: { ...file.metadata, sourceAsset: input.sourceName },
       }
     })
-    const outputs = await assetService.uploadAssets(derivedInputs)
     return Response.json({ outputs }, { status: 201 })
   } catch (error) {
     const message = safeError(error)

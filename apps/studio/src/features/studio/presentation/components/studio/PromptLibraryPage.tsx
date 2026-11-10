@@ -1,5 +1,7 @@
 'use client'
 
+import { studioFetch } from '@/lib/studio-local-api'
+
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
@@ -54,7 +56,7 @@ export function PromptLibraryPage() {
       const query = new URLSearchParams({ page: String(page) })
       if (search.trim()) query.set('search', search.trim())
       if (category) query.set('category', category)
-      const response = await fetch(`/api/studio/prompts?${query}`)
+      const response = await studioFetch(`/api/studio/prompts?${query}`)
       const body = (await response.json()) as {
         docs?: PromptRecord[]
         totalPages?: number
@@ -99,7 +101,7 @@ export function PromptLibraryPage() {
         .filter(Boolean),
     }
     try {
-      const response = await fetch('/api/studio/prompts', {
+      const response = await studioFetch('/api/studio/prompts', {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editing ? { id: editing.id, ...body } : body),
@@ -122,7 +124,7 @@ export function PromptLibraryPage() {
       locale === 'vi' ? `Xóa “${prompt.title}”?` : `Delete “${prompt.title}”?`,
     )
     if (!confirmed) return
-    const response = await fetch('/api/studio/prompts', {
+    const response = await studioFetch('/api/studio/prompts', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: prompt.id }),
@@ -142,7 +144,7 @@ export function PromptLibraryPage() {
 
   const savePromptAsTextAsset = async (prompt: PromptRecord) => {
     try {
-      const response = await fetch('/api/studio/text-assets', {
+      const response = await studioFetch('/api/studio/text-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
