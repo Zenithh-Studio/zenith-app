@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
-import { ProductionPage } from '@/features/studio'
+import { ProductionDashboard } from '@/features/studio'
 
-export const metadata: Metadata = { title: 'Production · Zenith Studio' }
+export const metadata: Metadata = { title: 'Productions · Zenith Studio' }
 
 export default function ProductionRoute() {
-  return <ProductionPage />
+  return <ProductionDashboard />
 }

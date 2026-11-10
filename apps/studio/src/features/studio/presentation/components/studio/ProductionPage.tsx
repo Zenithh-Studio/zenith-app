@@ -6,6 +6,7 @@ import Image from 'next/image'
 import {
   AlertCircle,
   ArrowDownToLine,
+  ArrowLeft,
   Check,
   CircleCheck,
   Clapperboard,
@@ -15,11 +16,13 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   RefreshCw,
+  Save,
   Upload,
   Video,
   WandSparkles,
   X,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { studioFetch } from '@/lib/studio-local-api'
 import {
@@ -44,9 +47,6 @@ import type {
 import { useLocale } from '@/features/studio/shared/i18n/LocaleProvider'
 import { Sidebar } from './AppChrome'
 
-const sampleSheetUrl =
-  'https://docs.google.com/spreadsheets/d/1B1soX3EP58i68ZzCNUt_UhdVDqX7KTerBZRReXR43UA/edit?gid=305#gid=305'
-
 type Stage = 'master' | 'image' | 'motion'
 type OutputAsset = {
   id: string
@@ -67,9 +67,19 @@ type GenerationItem = {
   shotId?: string
   sourceImageKey?: string
 }
-type RunProgress = { stage: Stage; completed: number; total: number; itemId: string }
+type RunProgress = {
+  stage: Stage
+  completed: number
+  total: number
+  itemId: string
+}
 type ZipFile = { name: string; blob: Blob }
-type TextPreview = { column: string; rawValue: string; displayValue: string; isJson: boolean }
+type TextPreview = {
+  column: string
+  rawValue: string
+  displayValue: string
+  isJson: boolean
+}
 
 const imageProviders = providersFor('image').filter((provider) => provider.models.image?.length)
 const videoProviders = providersFor('video').filter((provider) => provider.models.video?.length)
@@ -376,7 +386,9 @@ async function createStoredZip(files: ZipFile[]) {
   endView.setUint16(10, files.length, true)
   endView.setUint32(12, centralSize, true)
   endView.setUint32(16, offset, true)
-  return new Blob([...localParts, ...centralParts, end], { type: 'application/zip' })
+  return new Blob([...localParts, ...centralParts, end], {
+    type: 'application/zip',
+  })
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -390,15 +402,17 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
-export function ProductionPage() {
+export function ProductionPage({ productionId }: { productionId: string }) {
   const { t } = useLocale()
-  const [sourceUrl, setSourceUrl] = useState(sampleSheetUrl)
-  const [productions, setProductions] = useState<ProductionRecord[]>([])
+  const [sourceUrl, setSourceUrl] = useState('')
   const [production, setProduction] = useState<ProductionRecord | null>(null)
+  const [productionSaved, setProductionSaved] = useState(true)
+  const [savingProduction, setSavingProduction] = useState(false)
   const productionRef = useRef<ProductionRecord | null>(null)
+  const productionSavedRef = useRef(true)
   const [selectedSheet, setSelectedSheet] = useState<ProductionSheetName>('Shot Master')
   const [importing, setImporting] = useState(false)
-  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [loadingProduction, setLoadingProduction] = useState(true)
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
   const [runningStage, setRunningStage] = useState<Stage | null>(null)
@@ -461,50 +475,45 @@ export function ProductionPage() {
       ).length
     : 0
 
-  const selectProduction = useCallback(async (id: string) => {
-    if (!id) return
-    setError('')
-    try {
-      const response = await studioFetch(`/api/studio/productions?id=${encodeURIComponent(id)}`)
-      const body = (await response.json()) as { production?: ProductionRecord; error?: string }
-      if (!response.ok || !body.production)
-        throw new Error(body.error || 'Production project not found.')
-      const normalized = normalizeStoredProduction(body.production)
-      setAssetsById({})
-      loadedAssetIds.current.clear()
-      productionRef.current = normalized
-      setProduction(normalized)
-      setSourceUrl(normalized.spreadsheetUrl)
-      setSelectedSheet('Shot Master')
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not load production project.')
-    }
-  }, [])
-
   useEffect(() => {
     let active = true
-    void studioFetch('/api/studio/productions', { cache: 'no-store' })
+    productionRef.current = null
+    productionSavedRef.current = true
+    loadedAssetIds.current.clear()
+    setAssetsById({})
+    setProduction(null)
+    setProductionSaved(true)
+    setSourceUrl('')
+    setLoadingProduction(true)
+    setError('')
+    void studioFetch(`/api/studio/productions?id=${encodeURIComponent(productionId)}`, {
+      cache: 'no-store',
+    })
       .then(async (response) => {
-        const body = (await response.json()) as { docs?: ProductionRecord[]; error?: string }
-        if (!response.ok) throw new Error(body.error || 'Could not load production projects.')
-        if (!active) return
-        const docs = (body.docs || []).map(normalizeStoredProduction)
-        setProductions(docs)
-        if (!productionRef.current && docs[0]) {
-          productionRef.current = docs[0]
-          setProduction(docs[0])
-          setSourceUrl(docs[0].spreadsheetUrl)
+        const body = (await response.json()) as {
+          production?: ProductionRecord
+          error?: string
         }
+        if (!response.ok || !body.production)
+          throw new Error(body.error || 'Production project not found.')
+        if (!active) return
+        const normalized = normalizeStoredProduction(body.production)
+        productionRef.current = normalized
+        productionSavedRef.current = true
+        setProductionSaved(true)
+        setProduction(normalized)
+        setSourceUrl(normalized.spreadsheetUrl)
+        setSelectedSheet('Shot Master')
       })
       .catch((failure) => {
         if (active)
-          setError(failure instanceof Error ? failure.message : 'Could not load projects.')
+          setError(failure instanceof Error ? failure.message : 'Could not load production.')
       })
-      .finally(() => active && setLoadingProjects(false))
+      .finally(() => active && setLoadingProduction(false))
     return () => {
       active = false
     }
-  }, [])
+  }, [productionId])
 
   useEffect(() => {
     let active = true
@@ -543,17 +552,34 @@ export function ProductionPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(next),
     })
-    const body = (await response.json()) as { production?: ProductionRecord; error?: string }
+    const body = (await response.json()) as {
+      production?: ProductionRecord
+      error?: string
+    }
     if (!response.ok || !body.production)
       throw new Error(body.error || 'Could not save production data.')
     productionRef.current = body.production
+    productionSavedRef.current = true
+    setProductionSaved(true)
     setProduction(body.production)
-    setProductions((current) => [
-      body.production!,
-      ...current.filter((item) => item.id !== body.production!.id),
-    ])
     return body.production
   }, [])
+
+  const saveCurrentProduction = async () => {
+    const current = productionRef.current
+    if (!current || savingProduction) return
+    setSavingProduction(true)
+    setError('')
+    setFeedback('')
+    try {
+      await saveProduction({ ...current, updatedAt: new Date().toISOString() })
+      setFeedback(t('production.savedFeedback'))
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not save production data.')
+    } finally {
+      setSavingProduction(false)
+    }
+  }
 
   const importSheet = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -575,7 +601,8 @@ export function ProductionPage() {
         throw new Error(body.error || 'Google Sheets could not be imported.')
       }
       const id = body.spreadsheetId
-      const old = productions.find((item) => item.id === id) || productionRef.current
+      if (id !== productionId) throw new Error(t('production.wrongSheet'))
+      const old = productionRef.current
       const now = new Date().toISOString()
       const info = productionProjectInfo(body.sheets, id)
       const next: ProductionRecord = {
@@ -595,10 +622,13 @@ export function ProductionPage() {
         setAssetsById({})
         loadedAssetIds.current.clear()
       }
-      const saved = await saveProduction(next)
+      productionRef.current = next
+      productionSavedRef.current = false
+      setProductionSaved(false)
+      setProduction(next)
       setSelectedSheet('Shot Master')
       setFeedback(
-        `${productionSheetNames.length} sheets · ${saved.sheets['Shot Master'].rows.length} shots · ${saved.validation.filter((issue) => issue.severity === 'error').length} validation errors`,
+        `${productionSheetNames.length} sheets · ${next.sheets['Shot Master'].rows.length} shots · ${next.validation.filter((issue) => issue.severity === 'error').length} validation errors`,
       )
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Google Sheets could not be imported.')
@@ -614,7 +644,9 @@ export function ProductionPage() {
         ids: ids.slice(offset, offset + 100).join(','),
         limit: '100',
       })
-      const response = await studioFetch(`/api/studio/assets?${query}`, { cache: 'no-store' })
+      const response = await studioFetch(`/api/studio/assets?${query}`, {
+        cache: 'no-store',
+      })
       const body = (await response.json()) as { docs?: OutputAsset[] }
       for (const asset of body.docs || []) loaded[asset.id] = asset
     }
@@ -653,8 +685,16 @@ export function ProductionPage() {
     force = false,
     batch = false,
   ) => {
-    const initial = productionRef.current
+    let initial = productionRef.current
     if (!initial || runningStage || (batchRunning && !batch)) return false
+    if (!productionSavedRef.current) {
+      try {
+        initial = await saveProduction(initial)
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : 'Could not save production data.')
+        return false
+      }
+    }
     const provider = stage === 'motion' ? videoProviderId : imageProviderId
     const model = stage === 'motion' ? videoModel : imageModel
     if (!provider || !model) {
@@ -737,7 +777,12 @@ export function ProductionPage() {
           }
         }
 
-        setProgress({ stage, completed, total: targets.length, itemId: item.itemId })
+        setProgress({
+          stage,
+          completed,
+          total: targets.length,
+          itemId: item.itemId,
+        })
         const extension = stage === 'motion' ? 'mp4' : 'png'
         const path = `productions/${safePathSegment(current.projectCode)}/${stageFolder(stage)}/${safePathSegment(item.itemId)}.${extension}`
         const outputMetadata = {
@@ -761,7 +806,10 @@ export function ProductionPage() {
               model,
               prompt: item.prompt,
               ...(stage === 'motion'
-                ? { duration: item.duration, aspectRatio: item.aspectRatio || '16:9' }
+                ? {
+                    duration: item.duration,
+                    aspectRatio: item.aspectRatio || '16:9',
+                  }
                 : {
                     aspectRatio: item.aspectRatio || (stage === 'image' ? '16:9' : '1:1'),
                     quality: 'standard',
@@ -771,7 +819,11 @@ export function ProductionPage() {
             }),
           })
           const result = (await response.json()) as {
-            generation?: { id?: string; status?: string; outputs?: Array<{ value?: OutputAsset }> }
+            generation?: {
+              id?: string
+              status?: string
+              outputs?: Array<{ value?: OutputAsset }>
+            }
             error?: string
           }
           const outputAsset = result.generation?.outputs?.find((output) => output.value)?.value
@@ -802,7 +854,12 @@ export function ProductionPage() {
           }
           generated += 1
           completed += 1
-          setProgress({ stage, completed, total: targets.length, itemId: item.itemId })
+          setProgress({
+            stage,
+            completed,
+            total: targets.length,
+            itemId: item.itemId,
+          })
           productionRef.current = updated
         } catch (failure) {
           const message =
@@ -889,8 +946,14 @@ export function ProductionPage() {
       form.set('file', file)
       form.set('alt', item.title)
       form.set('scope', 'upload')
-      const response = await studioFetch('/api/studio/assets', { method: 'POST', body: form })
-      const body = (await response.json()) as { media?: OutputAsset; error?: string }
+      const response = await studioFetch('/api/studio/assets', {
+        method: 'POST',
+        body: form,
+      })
+      const body = (await response.json()) as {
+        media?: OutputAsset
+        error?: string
+      }
       if (!response.ok || !body.media?.id) throw new Error(body.error || 'Upload failed.')
       const folder = stageFolder(stage)
       const extension = /\.[A-Za-z0-9]{1,10}$/.exec(file.name)?.[0]?.toLowerCase()
@@ -912,7 +975,10 @@ export function ProductionPage() {
         updatedAt: now,
       })
       loadedAssetIds.current.add(body.media.id)
-      setAssetsById((existing) => ({ ...existing, [body.media!.id]: body.media! }))
+      setAssetsById((existing) => ({
+        ...existing,
+        [body.media!.id]: body.media!,
+      }))
       productionRef.current = updated
       setFeedback(`Uploaded ${file.name} for ${item.title}.`)
     } catch (failure) {
@@ -974,7 +1040,10 @@ export function ProductionPage() {
         if (!response.ok) continue
         const fallbackName = `${safePathSegment(item.itemId)}.${output.path.split('.').at(-1) || 'bin'}`
         const relativePath = output.path.replace(/^productions\/[^/]+\//, '')
-        files.push({ name: relativePath || fallbackName, blob: await response.blob() })
+        files.push({
+          name: relativePath || fallbackName,
+          blob: await response.blob(),
+        })
       }
       if (!files.length)
         throw new Error('The saved media files could not be opened in this browser.')
@@ -1009,6 +1078,12 @@ export function ProductionPage() {
       <Sidebar active="production" />
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-10 lg:py-9">
+          <Link
+            href="/production"
+            className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-zinc-600 hover:text-violet-700"
+          >
+            <ArrowLeft size={16} /> {t('production.backToManager')}
+          </Link>
           <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-violet-600">
@@ -1022,63 +1097,66 @@ export function ProductionPage() {
                 {t('production.fixedTablesSubtitle')}
               </p>
             </div>
-            {productions.length > 0 && (
-              <label className="flex min-w-[240px] flex-col gap-1.5 text-xs font-medium text-zinc-600">
-                {t('production.projects')}
-                <select
-                  value={production?.id || ''}
-                  onChange={(event) => void selectProduction(event.target.value)}
-                  className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                >
-                  {productions.map((item) => (
-                    <option
-                      key={item.id}
-                      value={item.id}
-                    >{`${item.projectCode} · ${item.title}`}</option>
-                  ))}
-                </select>
-              </label>
-            )}
           </header>
 
-          <section className="mb-6 rounded-2xl border border-zinc-200 bg-[#fbfbfc] p-4 sm:p-5">
-            <form onSubmit={importSheet} className="flex flex-col gap-3 lg:flex-row lg:items-end">
-              <label className="min-w-0 flex-1 text-xs font-semibold text-zinc-700">
-                {t('production.source')}
-                <input
-                  type="url"
-                  required
-                  value={sourceUrl}
-                  onChange={(event) => setSourceUrl(event.target.value)}
-                  placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-                  className="mt-1.5 h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={importing}
-                className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#272441] px-4 text-sm font-semibold text-white transition hover:bg-[#37325e] disabled:cursor-wait disabled:opacity-60"
-              >
-                {importing ? (
-                  <LoaderCircle size={16} className="animate-spin" />
-                ) : (
-                  <RefreshCw size={16} />
-                )}
-                {importing
-                  ? t('production.importing')
-                  : production?.spreadsheetUrl === sourceUrl.trim()
-                    ? t('production.refresh')
-                    : t('production.import')}
-              </button>
-            </form>
-            <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
-              <span>{t('production.share')}</span>
-              <span className="inline-flex items-center gap-1.5">
-                <Check size={13} />
-                {t('production.local')}
-              </span>
-            </div>
-          </section>
+          {production && (
+            <section className="mb-6 rounded-2xl border border-zinc-200 bg-[#fbfbfc] p-4 sm:p-5">
+              <form onSubmit={importSheet} className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                <label className="min-w-0 flex-1 text-xs font-semibold text-zinc-700">
+                  {t('production.source')}
+                  <input
+                    type="url"
+                    required
+                    disabled={loadingProduction}
+                    value={sourceUrl}
+                    onChange={(event) => setSourceUrl(event.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                    className="mt-1.5 h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />
+                </label>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    disabled={loadingProduction || importing || savingProduction}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#272441] px-4 text-sm font-semibold text-white transition hover:bg-[#37325e] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {importing ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
+                    {importing
+                      ? t('production.importing')
+                      : production?.spreadsheetUrl === sourceUrl.trim()
+                        ? t('production.refresh')
+                        : t('production.import')}
+                  </button>
+                  {production && !productionSaved && (
+                    <button
+                      type="button"
+                      onClick={() => void saveCurrentProduction()}
+                      disabled={savingProduction || importing}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {savingProduction ? (
+                        <LoaderCircle size={16} className="animate-spin" />
+                      ) : (
+                        <Save size={16} />
+                      )}
+                      {savingProduction ? t('production.saving') : t('production.save')}
+                    </button>
+                  )}
+                </div>
+              </form>
+              <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+                <span>{t('production.share')}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Check size={13} />
+                  {t('production.local')}
+                </span>
+              </div>
+            </section>
+          )}
 
           {error && (
             <div
@@ -1099,20 +1177,23 @@ export function ProductionPage() {
             </div>
           )}
 
-          {loadingProjects && !production ? (
+          {loadingProduction && !production ? (
             <div className="flex items-center gap-2 rounded-xl border border-zinc-200 p-8 text-sm text-zinc-500">
               <LoaderCircle size={17} className="animate-spin" />
               {t('common.loading')}
             </div>
           ) : !production ? (
-            <section className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-14 text-center">
+            <section className="rounded-2xl border border-zinc-200 bg-white px-6 py-12 text-center">
               <FileSpreadsheet size={32} className="mx-auto text-zinc-300" />
               <h2 className="mt-3 text-base font-semibold text-zinc-800">
-                {t('production.choose')}
+                {t('production.notFound')}
               </h2>
-              <p className="mx-auto mt-1 max-w-lg text-sm text-zinc-500">
-                {t('production.fixedTablesSubtitle')}
-              </p>
+              <Link
+                href="/production"
+                className="mt-5 inline-flex rounded-xl bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800"
+              >
+                {t('production.backToManager')}
+              </Link>
             </section>
           ) : (
             <>
@@ -1127,6 +1208,11 @@ export function ProductionPage() {
                           ? `${validationErrors.length} ${t('production.errors')}`
                           : t('production.valid')}
                       </span>
+                      {!productionSaved && (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                          {t('production.unsaved')}
+                        </span>
+                      )}
                       {validationWarnings.length > 0 && (
                         <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
                           {validationWarnings.length} {t('production.warnings')}
