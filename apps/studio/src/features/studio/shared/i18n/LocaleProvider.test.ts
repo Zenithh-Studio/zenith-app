@@ -20,9 +20,8 @@ describe('locale helpers', () => {
     )
   })
 
-  it('provides complete English and Vietnamese keys for account settings', () => {
+  it('provides complete English and Vietnamese keys for provider settings', () => {
     const settingsKeys = [
-      'settings.personalAccount',
       'settings.defaultsHelp',
       'settings.defaultModelText',
       'settings.defaultModelImage',
@@ -38,9 +37,6 @@ describe('locale helpers', () => {
       'settings.audioSpeed',
       'settings.audioInstructions',
       'settings.total',
-      'settings.roleUser',
-      'settings.roleAdmin',
-      'settings.sharedGatewayHelp',
       'settings.pasteProviderKey',
       'settings.customEndpointSaved',
       'settings.providerHint.openai',

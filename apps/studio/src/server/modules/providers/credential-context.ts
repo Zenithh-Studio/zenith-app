@@ -1,7 +1,6 @@
 import 'server-only'
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
 
@@ -23,37 +22,6 @@ export type ProviderCredentials = {
 }
 
 const credentialContext = new AsyncLocalStorage<ProviderCredentials>()
-
-function encryptionKey() {
-  const secret = process.env.PAYLOAD_SECRET
-  if (!secret) throw new Error('PAYLOAD_SECRET must be configured before storing provider keys.')
-  return createHmac('sha256', secret).update('zenith:user-provider-credentials:v1').digest()
-}
-
-export function encryptProviderKey(value: string) {
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv)
-  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
-  return [
-    'v1',
-    iv.toString('base64url'),
-    cipher.getAuthTag().toString('base64url'),
-    encrypted.toString('base64url'),
-  ].join('.')
-}
-
-export function decryptProviderKey(envelope: string) {
-  const [version, iv, tag, ciphertext] = envelope.split('.')
-  if (version !== 'v1' || !iv || !tag || !ciphertext) {
-    throw new Error('Stored provider credential has an unsupported envelope.')
-  }
-  const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(iv, 'base64url'))
-  decipher.setAuthTag(Buffer.from(tag, 'base64url'))
-  return Buffer.concat([
-    decipher.update(Buffer.from(ciphertext, 'base64url')),
-    decipher.final(),
-  ]).toString('utf8')
-}
 
 export function withProviderCredentials<T>(credentials: ProviderCredentials, run: () => T): T {
   return credentialContext.run(credentials, run)

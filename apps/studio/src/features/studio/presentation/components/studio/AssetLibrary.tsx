@@ -89,7 +89,7 @@ function mediaSource(asset: AssetDocument) {
         return `${parsed.pathname}${parsed.search}${parsed.hash}`
       }
     } catch {
-      // Fall back to the saved filename if Payload returns a malformed URL.
+      // Fall back to the saved filename if the asset URL is malformed.
     }
   }
 

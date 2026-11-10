@@ -19,7 +19,6 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@payload-config": ["./src/payload.config.ts"],
       "@znith/contracts": ["../../packages/contracts/src/index.ts"],
       "@znith/utils": ["../../packages/utils/src/index.ts"]
     },
@@ -34,5 +33,11 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "**/node_modules", "**/dist", "vite.config.*"]
+  "exclude": [
+    "node_modules",
+    "**/node_modules",
+    "**/dist",
+    "src/migrations/**",
+    "vite.config.*"
+  ]
 }

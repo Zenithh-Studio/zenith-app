@@ -447,7 +447,7 @@ function mediaSource(value: unknown, assetId?: unknown, fileName?: unknown) {
         return `${parsed.pathname}${parsed.search}${parsed.hash}`
       }
     } catch {
-      // Fall back to the upload filename when Payload returns a malformed URL.
+      // Fall back to the upload filename when the asset URL is malformed.
     }
   }
 

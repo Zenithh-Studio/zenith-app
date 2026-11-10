@@ -8,4 +8,3 @@ export type {
 } from './application/workflow-service.types'
 export * from './domain/workflow-repository'
 export * from './infrastructure/engine'
-export * from './infrastructure/payload-workflow-repository'
