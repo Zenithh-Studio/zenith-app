@@ -72,6 +72,18 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.saved': 'Settings saved.',
     'settings.error': 'Settings could not be saved.',
     'production.title': 'Production Pipeline',
+    'production.managerTitle': 'Productions',
+    'production.managerSubtitle':
+      'Manage saved productions and open one to review its sheet data and outputs.',
+    'production.create': 'Create production',
+    'production.draftReady': 'Production data is ready to save',
+    'production.saveOpen': 'Save & open',
+    'production.search': 'Search productions',
+    'production.noSearchResults': 'No productions match this search.',
+    'production.backToManager': 'Back to productions',
+    'production.notFound': 'Production not found',
+    'production.wrongSheet':
+      'This Google Sheet belongs to a different production. Create it from the production manager page.',
     'production.subtitle':
       'Import the four fixed production tables, validate their IDs and prompts, then generate or upload media per row.',
     'production.fixedTablesSubtitle':
@@ -83,6 +95,26 @@ const messages: Record<Locale, Record<string, string>> = {
     'production.share': 'The Google Sheet must allow viewer access by link so Zenith can read it.',
     'production.local': 'Imported data and generated files are saved in this browser’s IndexedDB.',
     'production.projects': 'Imported productions',
+    'production.savedHelp':
+      'Saved production data stays in this browser and is available to reopen here.',
+    'production.emptyTitle': 'Create your first production',
+    'production.emptyHelp':
+      'Import a Google Sheet and save it here. Open a saved production to review its data and generate media.',
+    'production.unsavedHelp':
+      'Your imported data is ready. Save it or start generating to add it to this list.',
+    'production.save': 'Save production',
+    'production.saving': 'Saving production…',
+    'production.savedFeedback': 'Production data saved in this browser.',
+    'production.unsaved': 'Unsaved',
+    'production.discardUnsaved':
+      'This production has unsaved imported data. Leave and discard those changes?',
+    'production.tableProject': 'Production',
+    'production.tableShots': 'Shots',
+    'production.tableImported': 'Last imported',
+    'production.tableOutputs': 'Saved outputs',
+    'production.tableAction': 'Action',
+    'production.openProduction': 'Open',
+    'production.selected': 'Selected',
     'production.choose': 'Choose a production',
     'production.openSource': 'Open source sheet',
     'production.importedAt': 'Last imported',
@@ -218,8 +250,21 @@ const messages: Record<Locale, Record<string, string>> = {
 }
 
 const additionalVietnamese: Record<string, string> = {
+  'common.cancel': 'Hủy',
   'nav.production': 'Sản xuất',
   'production.title': 'Quy trình sản xuất',
+  'production.managerTitle': 'Productions',
+  'production.managerSubtitle':
+    'Quản lý production đã lưu và mở từng mục để xem dữ liệu sheet cùng output.',
+  'production.create': 'Tạo production',
+  'production.draftReady': 'Dữ liệu production đã sẵn sàng để lưu',
+  'production.saveOpen': 'Lưu và mở',
+  'production.search': 'Tìm production',
+  'production.noSearchResults': 'Không tìm thấy production phù hợp.',
+  'production.backToManager': 'Quay lại danh sách production',
+  'production.notFound': 'Không tìm thấy production',
+  'production.wrongSheet':
+    'Google Sheet này thuộc production khác. Hãy tạo production từ trang quản lý.',
   'production.subtitle':
     'Nhập bốn bảng cố định, kiểm tra ID và prompt, sau đó tạo hoặc tải media theo từng dòng.',
   'production.fixedTablesSubtitle':
@@ -231,6 +276,26 @@ const additionalVietnamese: Record<string, string> = {
   'production.share': 'Google Sheet cần cho phép người có đường dẫn xem để Zenith đọc dữ liệu.',
   'production.local': 'Dữ liệu đã nhập và tệp tạo ra được lưu trong IndexedDB của trình duyệt này.',
   'production.projects': 'Dự án đã nhập',
+  'production.savedHelp':
+    'Dữ liệu production đã lưu sẽ nằm trong trình duyệt này và có thể mở lại tại đây.',
+  'production.emptyTitle': 'Create your first production',
+  'production.emptyHelp':
+    'Nhập Google Sheet và lưu tại đây. Mở production đã lưu để xem dữ liệu và tạo media.',
+  'production.unsavedHelp':
+    'Dữ liệu đã nhập sẵn sàng. Nhấn Lưu hoặc bắt đầu tạo để thêm vào danh sách.',
+  'production.save': 'Lưu production',
+  'production.saving': 'Đang lưu production…',
+  'production.savedFeedback': 'Đã lưu dữ liệu production trong trình duyệt này.',
+  'production.unsaved': 'Chưa lưu',
+  'production.discardUnsaved':
+    'Production này có dữ liệu vừa nhập chưa lưu. Rời đi và bỏ các thay đổi đó?',
+  'production.tableProject': 'Production',
+  'production.tableShots': 'Shot',
+  'production.tableImported': 'Nhập gần nhất',
+  'production.tableOutputs': 'Output đã lưu',
+  'production.tableAction': 'Thao tác',
+  'production.openProduction': 'Mở',
+  'production.selected': 'Đang chọn',
   'production.choose': 'Chọn dự án',
   'production.openSource': 'Mở Google Sheet',
   'production.importedAt': 'Nhập lần cuối',
