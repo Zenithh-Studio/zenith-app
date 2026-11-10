@@ -14,4 +14,4 @@ Maintainers will acknowledge reports, investigate them, coordinate a fix, and de
 
 ## Deployment notes
 
-Provider keys and `PAYLOAD_SECRET` must stay in server-only environment variables. Do not commit `.env` files. Restrict the database to the private Docker network or loopback, use HTTPS for public deployments, and back up PostgreSQL data and uploaded media.
+Studio provider credentials are stored in the user's browser IndexedDB and included only in requests that need a provider. Anyone with access to that browser profile and site origin can access this local data. Do not commit credentials or `.env` files. Use HTTPS for public deployments and protect access to the browser profile. ChatGPT2API and Muse2API retain their own Docker volumes and gateway keys.

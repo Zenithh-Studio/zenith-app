@@ -1,4 +1,6 @@
-# Big update database migration
+# Historical PostgreSQL migration notes
+
+This document describes the retired Payload/PostgreSQL data layer. The current app stores Studio data in browser IndexedDB, excludes these migration files from its active TypeScript build, and does not run them from Docker Compose.
 
 Migration `20261107_131639_big_update_user_data_and_studio` adds the app-user, settings, prompt, text-asset, signup-limit, and Studio-generation tables. It adds nullable owner and provenance fields to existing collections. The `up` migration creates tables and adds columns, constraints, and indexes; it does not delete or rewrite existing records.
 

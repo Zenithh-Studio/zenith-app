@@ -2,50 +2,43 @@
 
 ## Workspace map
 
-- **Studio app (`apps/studio/`)** owns the Next.js App Router, Payload Admin/API routes, application configuration, and runtime composition.
-- **Studio features (`apps/studio/src/features/`)** contain route views, browser interactions, shared layout, and styles. They do not access Payload credentials or persistence directly.
-- **Studio server (`apps/studio/src/server/`)** contains workflow and asset application services, repository ports, Payload adapters, provider execution, and collection definitions.
-- **Contracts (`packages/contracts/`)** owns workflow DTOs, Zod request schemas, node types, provider catalog, registry, and starter templates. It has no dependency on React, Next.js, or Payload.
+- **Studio app (`apps/studio/`)** owns the Next.js App Router, browser-local Studio UI, and stateless provider routes.
+- **Studio features (`apps/studio/src/features/`)** contain route views, browser interactions, shared layout, and styles. Durable data access goes through the IndexedDB adapter.
+- **Studio server (`apps/studio/src/server/`)** contains request validation, provider execution, and media validation. It does not persist Studio records.
+- **Contracts (`packages/contracts/`)** owns workflow DTOs, Zod request schemas, node types, provider catalog, registry, and starter templates.
 - **Utilities (`packages/utils/`)** contains pure functions reused across workspace boundaries.
 
-Next.js transpiles the shared packages through `transpilePackages`. The Studio app is packaged as a standalone Next.js server and runs with PostgreSQL through Docker Compose.
+Next.js transpiles the shared packages through `transpilePackages`. The Studio app is packaged as a standalone Next.js server. Docker Compose runs the app and optional provider gateways; it has no Studio database service.
 
-## Dependency direction
+## Data flow
 
 ```text
-App Router handlers → application services → domain repository ports
-                                         ↑
-Payload repositories and provider engine ─┘
-
-Frontend features → shared contracts and utilities
-Backend services  → shared contracts and utilities
+Browser IndexedDB → local Studio adapter → Studio UI
+Provider requests → App Router handlers → provider engine
 ```
 
-The route files are transport adapters. They validate request bodies, call the composed application service, and shape HTTP responses. `apps/studio/src/lib/backend-services.ts` injects the Payload Local API into backend repositories.
+The browser's `studio-local-api.ts` implements a fetch-compatible CRUD layer backed by IndexedDB. App Router handlers validate provider requests and return outputs for the browser to save.
 
 ## Workflow execution
 
-1. The API loads a workflow through `PayloadWorkflowRepository` with access checks enabled.
-2. `WorkflowService` creates an execution record with an immutable workflow-definition snapshot.
-3. The workflow engine checks node identifiers, edge ports, data types, required inputs, and cycles.
-4. Ready nodes run with bounded concurrency, retry, and timeout settings.
-5. The service persists node records, logs, duration, status, and errors, then updates the workflow's list-facing run status.
-6. The editor reloads the latest execution and displays node outputs and execution history.
+1. The browser reads a workflow definition from IndexedDB and sends it with a run request.
+2. The workflow engine checks node identifiers, edge ports, data types, required inputs, and cycles.
+3. Ready nodes run with bounded concurrency, retry, and timeout settings.
+4. The route returns execution records and outputs; the browser stores them in IndexedDB.
+5. The editor reloads the saved execution and displays node outputs and history.
 
-The snapshot is retained for reproducibility. Large binary media belongs in Payload's Media collection; workflow definitions should reference asset IDs and URLs only as needed by current execution behavior.
+Snapshots are retained for reproducibility. Binary media is kept in the `assetFiles` IndexedDB store; metadata is kept separately in `media`.
 
-## Backend layers
+## Persistence
 
-- **Domain:** repository interfaces and domain-facing data contracts.
-- **Application:** workflow and asset services that coordinate validation, template defaults, execution lifecycle, and file rules.
-- **Infrastructure:** Payload Local API adapters, provider calls, and the graph execution engine.
-- **Presentation:** Next.js route handlers in `apps/studio/src/app/(frontend)/api/studio`, kept thin and independent of persistence details.
+The browser database is named `zenith-studio`. Its stores are `workflows`, `executions`, `prompts`, `textAssets`, `media`, `assetFiles`, `generations`, and `settings`. Data is scoped to the browser profile and site origin and does not automatically sync between devices.
+
+The files in `apps/studio/src/migrations/` are historical PostgreSQL migration records. They are excluded from the active app build and are not run by Docker Compose.
 
 ## Security and operations
 
-- Provider keys and Payload secrets are server-only environment variables and are never stored in workflow exports.
-- PostgreSQL stores collection records. Payload uploads live in a persistent Docker volume.
-- Docker Compose waits for PostgreSQL readiness before starting the app. The Payload migration set is applied by the app during production startup.
+- Provider credentials are stored in browser IndexedDB and are included only in requests that need a provider; they are not included in workflow exports.
+- Anyone with access to the browser profile and site origin can access its local Studio data.
+- Docker Compose keeps ChatGPT2API and Muse2API gateway data and generated keys in their own volumes.
 - Workflow definitions are versioned JSON contracts. Port IDs and node types are durable data and require migration planning when changed.
-- The current application is a shared single-tenant workspace. Add app-user authentication, ownership relationships, and narrower collection access before serving private multi-user workspaces.
-- Long-running provider jobs currently execute in the request lifecycle. Durable queueing and recovery should use Payload Jobs when asynchronous execution is introduced.
+- Provider requests run in the request lifecycle. A future server-side queue would need a separate persistence and recovery design.
