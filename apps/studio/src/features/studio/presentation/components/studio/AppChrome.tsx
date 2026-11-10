@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   Boxes,
   CircleHelp,
+  Clapperboard,
   Command,
   Image as ImageIcon,
   Menu,
@@ -17,7 +18,8 @@ import {
 import { useEffect, useState } from 'react'
 import { useLocale } from '@/features/studio/shared/i18n/LocaleProvider'
 
-type NavigationId = 'workflows' | 'image' | 'video' | 'prompts' | 'assets' | 'settings' | 'docs'
+type NavigationId =
+  'workflows' | 'production' | 'image' | 'video' | 'prompts' | 'assets' | 'settings' | 'docs'
 
 const mainNavigation: Array<{
   id: NavigationId
@@ -25,6 +27,7 @@ const mainNavigation: Array<{
   Icon: typeof Workflow
 }> = [
   { id: 'workflows', href: '/workflows', Icon: Workflow },
+  { id: 'production', href: '/production', Icon: Clapperboard },
   { id: 'image', href: '/image', Icon: ImageIcon },
   { id: 'video', href: '/video', Icon: Video },
   { id: 'prompts', href: '/prompts', Icon: BookOpenText },

@@ -4,6 +4,14 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ## Unreleased
 
+### [Added]
+
+- Add a Production Pipeline page that imports only Visual Bible, Shot Master, Image Prompt, and Motion Prompt tables; supports per-row generate, upload, preview, and download actions plus bulk generation and ZIP export.
+
+### [Fixed]
+
+- Normalize the fixed Production table headers, accept common header/tab name variants, and allow image prompts to generate without reference assets.
+
 ### [Improved]
 
 - Add targeted indexes for owner-scoped Studio lists and background generation polling.
