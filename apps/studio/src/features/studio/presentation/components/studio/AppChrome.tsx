@@ -1,13 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   Boxes,
   CircleHelp,
   Command,
   Image as ImageIcon,
-  LogOut,
   Menu,
   Settings2,
   Video,
@@ -52,28 +51,6 @@ export function Brand() {
         Studio
       </span>
     </Link>
-  )
-}
-
-function SignOutButton({ onSignedOut }: { onSignedOut?: () => void }) {
-  const { t } = useLocale()
-  const router = useRouter()
-  const signOut = async () => {
-    await fetch('/api/users/logout', { method: 'POST' }).catch(() => undefined)
-    onSignedOut?.()
-    router.replace('/login')
-    router.refresh()
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => void signOut()}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
-    >
-      <LogOut size={16} aria-hidden="true" />
-      {t('nav.signOut')}
-    </button>
   )
 }
 
@@ -166,7 +143,7 @@ export function Sidebar({ active }: { active?: NavigationId }) {
               <span className="block text-[11px] text-zinc-400">{t('nav.projects')}</span>
             </span>
           </div>
-          <SignOutButton />
+          <p className="px-3 py-2 text-[11px] text-zinc-400">Local IndexedDB workspace</p>
         </div>
       </aside>
       <div className="flex h-14 items-center justify-between border-b border-zinc-200 bg-[#fbfbfc] px-4 lg:hidden">
@@ -196,7 +173,7 @@ export function Sidebar({ active }: { active?: NavigationId }) {
             </div>
             <NavigationLinks active={active} onNavigate={() => setMobileOpen(false)} />
             <div className="mt-auto border-t border-zinc-200/80 pt-3">
-              <SignOutButton onSignedOut={() => setMobileOpen(false)} />
+              <p className="px-3 py-2 text-[11px] text-zinc-400">Local IndexedDB workspace</p>
             </div>
           </aside>
         </div>

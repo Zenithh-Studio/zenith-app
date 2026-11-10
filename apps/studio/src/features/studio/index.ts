@@ -1,5 +1,4 @@
 export { AssetLibrary } from './presentation/components/studio/AssetLibrary'
-export { AuthForm } from './presentation/components/studio/AuthForm'
 export { SettingsPage } from './presentation/components/studio/SettingsPage'
 export { PromptLibraryPage } from './presentation/components/studio/PromptLibraryPage'
 export { MediaStudioPage } from './presentation/components/studio/MediaStudioPage'
