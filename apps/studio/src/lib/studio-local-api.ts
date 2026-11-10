@@ -139,6 +139,87 @@ async function mediaObjectUrl(record: StudioRecord) {
   return url
 }
 
+function generationOutputMetadata(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  const safeText = (input: unknown, maximum = 200) =>
+    typeof input === 'string'
+      ? input
+          .replace(/[\u0000-\u001f\u007f]/g, '')
+          .trim()
+          .slice(0, maximum)
+      : ''
+  const filename = safeText(source.filename, 120)
+  const outputPath = safeText(source.outputPath, 240)
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/
+  if (
+    !filename ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(filename) ||
+    !outputPath ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(outputPath) ||
+    outputPath.split('/').some((segment) => segment === '.' || segment === '..') ||
+    typeof source.productionId !== 'string' ||
+    !/^[A-Za-z0-9_-]{10,128}$/.test(source.productionId) ||
+    typeof source.itemId !== 'string' ||
+    !idPattern.test(source.itemId) ||
+    !['master', 'image', 'motion'].includes(String(source.stage))
+  ) {
+    return null
+  }
+  return {
+    filename,
+    outputPath,
+    productionId: source.productionId,
+    productionProjectCode: safeText(source.projectCode, 80),
+    productionItemId: source.itemId,
+    productionStage: String(source.stage),
+    title: safeText(source.title, 200) || filename,
+    alt: safeText(source.alt, 500) || filename,
+  }
+}
+
+async function productionsApi(url: URL, method: string, init?: RequestInit) {
+  if (url.pathname !== '/api/studio/productions') return null
+  if (method === 'GET') {
+    const id = url.searchParams.get('id')
+    if (id) {
+      const production = await getRecord('productions', id)
+      return production ? json({ production }) : notFound('Production project not found.')
+    }
+    const docs = (await listRecords('productions', {
+      index: 'updatedAt',
+      direction: 'prev',
+    })) as StudioRecord[]
+    return json({ docs })
+  }
+  if (method !== 'PUT') return null
+  const body = (await readJson(init)) as Record<string, unknown> | null
+  if (
+    !body ||
+    typeof body.id !== 'string' ||
+    !/^[A-Za-z0-9_-]{10,128}$/.test(body.id) ||
+    typeof body.spreadsheetUrl !== 'string' ||
+    !body.sheets ||
+    typeof body.sheets !== 'object' ||
+    typeof body.sourceHash !== 'string'
+  ) {
+    return json({ error: 'The production import record is invalid.' }, 400)
+  }
+  const current = await getRecord('productions', body.id)
+  const now = new Date().toISOString()
+  const production = {
+    ...(current || {}),
+    ...body,
+    id: body.id,
+    outputs:
+      body.outputs && typeof body.outputs === 'object' ? body.outputs : current?.outputs || {},
+    createdAt: current?.createdAt || now,
+    updatedAt: now,
+  }
+  await putRecord('productions', production)
+  return json({ production })
+}
+
 async function persistMediaValue(value: NodeValue): Promise<NodeValue> {
   if (!['image', 'video', 'audio'].includes(value.type)) return value
   const data = mediaData(value)
@@ -289,7 +370,9 @@ async function generationsApi(url: URL, method: string, init?: RequestInit) {
   if (method !== 'POST') return null
   const requested = (await readJson(init)) as Record<string, unknown> | null
   if (!requested) return json({ error: 'Enter valid generation settings.' }, 400)
+  const outputMetadata = generationOutputMetadata(requested.outputMetadata)
   let input = { ...requested }
+  delete input.outputMetadata
   if (typeof input.retryOf === 'string') {
     const previous = await getRecord('generations', input.retryOf)
     const snapshot = previous?.inputSnapshot as Record<string, unknown> | undefined
@@ -370,7 +453,23 @@ async function generationsApi(url: URL, method: string, init?: RequestInit) {
     outputs.map(async (output) => {
       const asset =
         output.value && typeof output.value === 'object' ? (output.value as StudioRecord) : null
-      return asset ? { ...output, value: await persistMediaDocument(asset) } : output
+      if (!asset) return output
+      const persisted = await persistMediaDocument(asset)
+      if (!outputMetadata) return { ...output, value: persisted }
+      const labeled: StudioRecord = {
+        ...persisted,
+        filename: outputMetadata.filename,
+        title: outputMetadata.title,
+        alt: outputMetadata.alt,
+        productionId: outputMetadata.productionId,
+        productionProjectCode: outputMetadata.productionProjectCode,
+        productionItemId: outputMetadata.productionItemId,
+        productionStage: outputMetadata.productionStage,
+        productionOutputPath: outputMetadata.outputPath,
+        updatedAt: new Date().toISOString(),
+      }
+      await putRecord('media', labeled)
+      return { ...output, value: { ...labeled, url: await mediaObjectUrl(labeled) } }
     }),
   )
   const localGeneration = {
@@ -715,11 +814,21 @@ async function assetsApi(url: URL, method: string, init?: RequestInit) {
   })
   if (method === 'GET' && !isSave) {
     const type = url.searchParams.get('type') || 'all'
+    const requestedIds = new Set(
+      (url.searchParams.get('ids') || '')
+        .split(',')
+        .filter((id) => /^[A-Za-z0-9:_-]{1,160}$/.test(id))
+        .slice(0, 100),
+    )
     const search = url.searchParams.get('search')?.trim() || ''
     const sort = url.searchParams.get('sort') || 'date-desc'
     if (search) {
       media = media.filter((item) => matchesSearch(item, search))
       textAssets = textAssets.filter((item) => matchesSearch(item, search))
+    }
+    if (requestedIds.size) {
+      media = media.filter((item) => requestedIds.has(item.id))
+      textAssets = []
     }
     const mediaTypes = ['image', 'video', 'audio', 'document', 'other']
     if (mediaTypes.includes(type))
@@ -739,7 +848,7 @@ async function assetsApi(url: URL, method: string, init?: RequestInit) {
         return publicMedia({ ...item, kind: 'media' }, file?.blob)
       }),
     )
-    let all: StudioRecord[] =
+    const all: StudioRecord[] =
       type === 'text' ? textItems : type === 'all' ? [...mediaItems, ...textItems] : mediaItems
     const descending = sort.startsWith('-') || sort.endsWith('desc')
     all.sort((left, right) => {
@@ -998,6 +1107,7 @@ export async function studioFetch(input: RequestInfo | URL, init?: RequestInit):
     const localResponse =
       (await workflowSubrouteApi(url, method, init)) ||
       (await workflowsApi(url, method, init)) ||
+      (await productionsApi(url, method, init)) ||
       (await generationsApi(url, method, init)) ||
       (await promptsApi(url, method, init)) ||
       (await textAssetsApi(url, method, init)) ||

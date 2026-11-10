@@ -15,13 +15,14 @@ export const studioStores = [
   'assetFiles',
   'generations',
   'settings',
+  'productions',
 ] as const
 
 export type StudioStore = (typeof studioStores)[number]
 export type StudioRecord = { id: string; [key: string]: unknown }
 
 const DATABASE_NAME = 'zenith-studio'
-const DATABASE_VERSION = 3
+const DATABASE_VERSION = 4
 let databasePromise: Promise<IDBDatabase> | undefined
 
 const storeIndexes: Partial<
@@ -39,6 +40,7 @@ const storeIndexes: Partial<
     { name: 'createdAt', keyPath: 'createdAt' },
     { name: 'modalityCreatedAt', keyPath: ['modality', 'createdAt'] },
   ],
+  productions: [{ name: 'updatedAt', keyPath: 'updatedAt' }],
 }
 
 function openDatabase() {
