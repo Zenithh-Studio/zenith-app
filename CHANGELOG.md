@@ -4,6 +4,10 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 
 ## Unreleased
 
+### [Improved]
+
+- Add targeted indexes for owner-scoped Studio lists and background generation polling.
+
 ## v0.3.1 - 2026-11-08
 
 ### [Added]

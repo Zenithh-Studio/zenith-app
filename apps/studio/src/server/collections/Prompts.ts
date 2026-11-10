@@ -3,6 +3,8 @@ import { ownerAccess, ownerCreateAccess, setDocumentOwner } from './access'
 
 export const Prompts: CollectionConfig = {
   slug: 'prompts',
+  versions: false,
+  indexes: [{ fields: ['owner', 'updatedAt'] }],
   admin: {
     group: 'Znith Studio',
     useAsTitle: 'title',

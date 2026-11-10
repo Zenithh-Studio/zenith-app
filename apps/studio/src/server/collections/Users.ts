@@ -6,6 +6,7 @@ const settingsRuntimeAccess: FieldAccess = ({ req }) =>
 
 export const Users: CollectionConfig = {
   slug: 'users',
+  versions: false,
   auth: {
     maxLoginAttempts: 5,
     lockTime: 15 * 60 * 1000,

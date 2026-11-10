@@ -2,6 +2,7 @@ import type { CollectionConfig } from 'payload'
 
 export const AdminSetup: CollectionConfig = {
   slug: 'admin-setup',
+  versions: false,
   admin: { hidden: true },
   access: {
     create: () => false,

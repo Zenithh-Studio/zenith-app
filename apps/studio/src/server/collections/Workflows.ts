@@ -11,6 +11,8 @@ import {
 
 export const Workflows: CollectionConfig = {
   slug: 'workflows',
+  versions: false,
+  indexes: [{ fields: ['owner', 'updatedAt'] }],
   admin: {
     group: 'Znith Studio',
     useAsTitle: 'name',

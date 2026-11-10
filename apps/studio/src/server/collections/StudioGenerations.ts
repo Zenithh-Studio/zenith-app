@@ -3,6 +3,11 @@ import { isAppUser, studioRuntimeOwnerAccess, ownerAccess, setDocumentOwner } fr
 
 export const StudioGenerations: CollectionConfig = {
   slug: 'studio-generations',
+  versions: false,
+  indexes: [
+    { fields: ['owner', 'modality', 'createdAt'] },
+    { fields: ['modality', 'status', 'lastPolledAt'] },
+  ],
   admin: { group: 'Znith Studio', hidden: true, useAsTitle: 'id' },
   access: {
     create: ({ req }) => isAppUser(req.user) && req.context?.studioRuntime === true,

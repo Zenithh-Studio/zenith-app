@@ -8,6 +8,8 @@ import { mediaServiceWriteAccess, ownerAccess, setDocumentOwner } from './access
 
 export const Media: CollectionConfig = {
   slug: 'media',
+  versions: false,
+  indexes: [{ fields: ['owner', 'createdAt'] }],
   access: {
     create: mediaServiceWriteAccess,
     delete: mediaServiceWriteAccess,

@@ -5,6 +5,7 @@ import * as migration_20261107_161710_signup_attempts_collection from './2026110
 import * as migration_20261107_162813_executions_workflow_optional from './20261107_162813_executions_workflow_optional'
 import * as migration_20261107_165136_execution_retry_links from './20261107_165136_execution_retry_links'
 import * as migration_20261109_234410_compact_settings_and_cleanup_versions from './20261109_234410_compact_settings_and_cleanup_versions'
+import * as migration_20261110_040305_optimize_query_indexes from './20261110_040305_optimize_query_indexes'
 
 export const migrations = [
   {
@@ -41,5 +42,10 @@ export const migrations = [
     up: migration_20261109_234410_compact_settings_and_cleanup_versions.up,
     down: migration_20261109_234410_compact_settings_and_cleanup_versions.down,
     name: '20261109_234410_compact_settings_and_cleanup_versions',
+  },
+  {
+    up: migration_20261110_040305_optimize_query_indexes.up,
+    down: migration_20261110_040305_optimize_query_indexes.down,
+    name: '20261110_040305_optimize_query_indexes',
   },
 ]

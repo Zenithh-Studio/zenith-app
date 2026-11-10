@@ -3,7 +3,8 @@ import { canWriteWorkflowRuntime, ownerAccess, workflowRuntimeAccess } from './a
 
 export const Executions: CollectionConfig = {
   slug: 'executions',
-  indexes: [{ fields: ['workflow', 'startedAt'] }],
+  versions: false,
+  indexes: [{ fields: ['workflow', 'startedAt'] }, { fields: ['status', 'updatedAt'] }],
   admin: {
     group: 'Znith Studio',
     useAsTitle: 'id',

@@ -3,6 +3,8 @@ import { ownerAccess, ownerCreateAccess, setDocumentOwner } from './access'
 
 export const TextAssets: CollectionConfig = {
   slug: 'text-assets',
+  versions: false,
+  indexes: [{ fields: ['owner', 'updatedAt'] }],
   admin: { group: 'Znith Studio', useAsTitle: 'title' },
   access: {
     create: ownerCreateAccess,

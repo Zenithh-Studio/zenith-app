@@ -2,6 +2,7 @@ import type { CollectionConfig } from 'payload'
 
 export const SignupAttempts: CollectionConfig = {
   slug: 'signup-attempts',
+  versions: false,
   admin: { hidden: true },
   access: {
     create: () => false,
