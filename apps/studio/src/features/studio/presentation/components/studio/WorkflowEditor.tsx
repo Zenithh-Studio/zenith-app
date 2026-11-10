@@ -24,6 +24,7 @@ import {
   reconnectEdge,
   useEdgesState,
   useNodesState,
+  useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react'
 import {
@@ -3149,7 +3150,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null)
   const [paletteSearch, setPaletteSearch] = useState('')
-  const [paletteOpen, setPaletteOpen] = useState(true)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteWidth, setPaletteWidth] = useState(280)
   const [showMinimap, setShowMinimap] = useState(true)
   const [canvasMode, setCanvasMode] = useState<'select' | 'pan'>('select')
@@ -3198,6 +3199,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const runLockRef = useRef(false)
   const runStartedAtRef = useRef<string | null>(null)
   const runExecutionIdRef = useRef<string | null>(null)
+  const hasLoadedWorkflowRef = useRef(false)
+  const initialFitPendingRef = useRef(false)
   const groupDragRef = useRef<{ groupId: string; lastPosition: { x: number; y: number } } | null>(
     null,
   )
@@ -3206,6 +3209,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
   const textEditHistoryCaptured = useRef(new Set<string>())
   const clipboard = useRef<{ nodes: WorkflowNode[]; edges: WorkflowEdge[] } | null>(null)
   const { fitView, screenToFlowPosition, zoomIn, zoomOut, getZoom, deleteElements } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
@@ -3214,6 +3218,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const refreshedExecutions = responseBody.executions as ExecutionDocument[]
     const activeExecution = refreshedExecutions.find((execution) => execution.status === 'running')
     const latestExecution = activeExecution ?? refreshedExecutions[0]
+    if (!hasLoadedWorkflowRef.current) {
+      hasLoadedWorkflowRef.current = true
+      initialFitPendingRef.current = responseBody.workflow.definition.nodes.length > 0
+    }
     setWorkflow(responseBody.workflow)
     setExecutions(refreshedExecutions)
     setNodes(
@@ -3242,8 +3250,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     setEdges(toFlowEdges(responseBody.workflow.definition))
     setUndoStack([])
     setRedoStack([])
-    requestAnimationFrame(() => fitView({ padding: 0.18, duration: 500 }))
-  }, [fitView, setEdges, setNodes, workflowId])
+  }, [setEdges, setNodes, workflowId])
 
   const checkVideoTask = useCallback(
     async (nodeId: string) => {
@@ -3321,6 +3328,15 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!initialFitPendingRef.current || !nodesInitialized) return
+    const frame = window.requestAnimationFrame(() => {
+      initialFitPendingRef.current = false
+      void fitView({ padding: 0.22, duration: 500 })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [fitView, nodesInitialized])
 
   useEffect(() => {
     if (!running || !runStartedAt) return
@@ -4981,7 +4997,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-[#f5f5f6] text-zinc-950">
-      <header className="z-20 flex h-12 shrink-0 items-center gap-2 bg-[#f5f5f6] px-3 sm:px-4">
+      <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 bg-[#f5f5f6] px-3 sm:px-4">
         <input
           ref={mediaInput}
           type="file"
@@ -5025,6 +5041,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               {dirty ? t('Unsaved changes') : t('All changes saved')}
             </span>
           </div>
+        </div>
+        <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-[10px] font-medium text-zinc-500 shadow-sm backdrop-blur xl:block">
+          {workflowNodes.length} nodes · {edges.length} connections ·{' '}
+          {nodes.filter((node) => node.data.canvasGroup).length} groups
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <Link
@@ -5268,7 +5288,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       <div className="relative flex min-h-0 flex-1">
         {paletteOpen && (
           <div
-            className="absolute inset-y-0 left-0 z-30 lg:relative lg:inset-auto lg:shrink-0"
+            className="absolute inset-y-0 left-0 z-30 lg:relative lg:inset-auto lg:h-full lg:shrink-0"
             style={{ width: `${paletteWidth}px` }}
           >
             <WorkflowSidePanel
@@ -5342,7 +5362,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
           </div>
         )}
 
-        <section className="relative min-w-0 flex-1">
+        <section className="relative min-h-0 min-w-0 flex-1">
           <NodeActionContext.Provider
             value={{
               isWorkflowRunning: running,
@@ -5616,10 +5636,6 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               </TextNodeEditorContext.Provider>
             </EdgeDeleteContext.Provider>
           </NodeActionContext.Provider>
-          <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-[10px] font-medium text-zinc-500 shadow-sm backdrop-blur">
-            {workflowNodes.length} nodes · {edges.length} connections ·{' '}
-            {nodes.filter((node) => node.data.canvasGroup).length} groups
-          </div>
           <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl border border-zinc-200 bg-white/95 p-1.5 shadow-xl backdrop-blur [scrollbar-width:none] sm:bottom-4">
             <DockButton
               label="Select mode"
@@ -6930,14 +6946,31 @@ function MediaConfiguration({
   const imageResolution = String(config.resolution || '1k')
   const imageAspectRatio = String(config.aspectRatio || '1:1')
   const imageDimensions = readImageDimensions(config.size, imageResolution, imageAspectRatio)
-  const [imageWidthDraft, setImageWidthDraft] = useState(String(imageDimensions.width))
-  const [imageHeightDraft, setImageHeightDraft] = useState(String(imageDimensions.height))
-  const [imageCountDraft, setImageCountDraft] = useState(String(normalizeImageCount(config.count)))
-  useEffect(() => {
-    setImageWidthDraft(String(imageDimensions.width))
-    setImageHeightDraft(String(imageDimensions.height))
-  }, [imageDimensions.height, imageDimensions.width])
-  useEffect(() => setImageCountDraft(String(normalizeImageCount(config.count))), [config.count])
+  const imageDimensionsKey = JSON.stringify([config.size, imageResolution, imageAspectRatio])
+  const [imageSizeDraftState, setImageSizeDraftState] = useState(() => ({
+    key: imageDimensionsKey,
+    width: String(imageDimensions.width),
+    height: String(imageDimensions.height),
+  }))
+  const imageSizeDraft =
+    imageSizeDraftState.key === imageDimensionsKey
+      ? imageSizeDraftState
+      : {
+          key: imageDimensionsKey,
+          width: String(imageDimensions.width),
+          height: String(imageDimensions.height),
+        }
+  const imageWidthDraft = imageSizeDraft.width
+  const imageHeightDraft = imageSizeDraft.height
+  const normalizedImageCount = normalizeImageCount(config.count)
+  const [imageCountDraftState, setImageCountDraftState] = useState(() => ({
+    count: normalizedImageCount,
+    value: String(normalizedImageCount),
+  }))
+  const imageCountDraft =
+    imageCountDraftState.count === normalizedImageCount
+      ? imageCountDraftState.value
+      : String(normalizedImageCount)
   const ratios = imageAspectRatios
   return (
     <div className="space-y-4">
@@ -7178,7 +7211,11 @@ function MediaConfiguration({
                   value={imageWidthDraft}
                   onChange={(event) => {
                     const value = event.target.value
-                    setImageWidthDraft(value)
+                    setImageSizeDraftState({
+                      key: imageDimensionsKey,
+                      width: value,
+                      height: imageHeightDraft,
+                    })
                     const width = Math.floor(Number(value))
                     if (width > 0) onChange('size', `${width}x${imageDimensions.height}`)
                   }}
@@ -7195,7 +7232,11 @@ function MediaConfiguration({
                   value={imageHeightDraft}
                   onChange={(event) => {
                     const value = event.target.value
-                    setImageHeightDraft(value)
+                    setImageSizeDraftState({
+                      key: imageDimensionsKey,
+                      width: imageWidthDraft,
+                      height: value,
+                    })
                     const height = Math.floor(Number(value))
                     if (height > 0) onChange('size', `${imageDimensions.width}x${height}`)
                   }}
@@ -7215,7 +7256,7 @@ function MediaConfiguration({
                   type="button"
                   aria-pressed={normalizeImageCount(config.count) === count}
                   onClick={() => {
-                    setImageCountDraft(String(count))
+                    setImageCountDraftState({ count, value: String(count) })
                     onChange('count', count)
                   }}
                   className={`h-8 rounded-lg border px-2.5 text-[10px] font-medium ${normalizeImageCount(config.count) === count ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-zinc-200 text-zinc-500'}`}
@@ -7231,12 +7272,13 @@ function MediaConfiguration({
                 value={imageCountDraft}
                 onChange={(event) => {
                   const value = event.target.value
-                  setImageCountDraft(value)
-                  if (value) onChange('count', normalizeImageCount(value))
+                  const count = value ? normalizeImageCount(value) : normalizedImageCount
+                  setImageCountDraftState({ count, value })
+                  if (value) onChange('count', count)
                 }}
                 onBlur={() => {
                   const count = normalizeImageCount(imageCountDraft)
-                  setImageCountDraft(String(count))
+                  setImageCountDraftState({ count, value: String(count) })
                   onChange('count', count)
                 }}
                 className="h-8 w-16 rounded-lg border border-zinc-200 px-2 text-center text-[10px] font-normal text-zinc-700"

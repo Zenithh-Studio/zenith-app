@@ -1,5 +1,8 @@
-import type { CollectionConfig } from 'payload'
+import type { CollectionConfig, FieldAccess } from 'payload'
 import { isAppAdmin, isAppUser } from './access'
+
+const settingsRuntimeAccess: FieldAccess = ({ req }) =>
+  req.context?.providerSettingsRuntime === true
 
 export const Users: CollectionConfig = {
   slug: 'users',
@@ -49,6 +52,52 @@ export const Users: CollectionConfig = {
   },
   fields: [
     { name: 'name', type: 'text' },
+    {
+      name: 'locale',
+      type: 'select',
+      options: ['en', 'vi'],
+      defaultValue: 'en',
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'modelDefaults',
+      type: 'json',
+      defaultValue: {},
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'imagePreferences',
+      type: 'json',
+      defaultValue: {},
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'videoPreferences',
+      type: 'json',
+      defaultValue: {},
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'audioPreferences',
+      type: 'json',
+      defaultValue: {},
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'uiPreferences',
+      type: 'json',
+      defaultValue: {},
+      access: { read: settingsRuntimeAccess },
+    },
+    {
+      name: 'providerCredentials',
+      type: 'json',
+      access: {
+        create: settingsRuntimeAccess,
+        read: settingsRuntimeAccess,
+        update: settingsRuntimeAccess,
+      },
+    },
     {
       name: 'role',
       type: 'select',

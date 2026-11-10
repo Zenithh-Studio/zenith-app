@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { promptTagsToJson } from '@/server/modules/prompts/prompt-tags'
 import { getAppSession, unauthenticatedResponse } from '@/lib/app-auth'
 import { getPayloadClient } from '@/lib/payload'
 import { withApiLogging } from '@/lib/server-logger'
@@ -130,7 +131,7 @@ async function createPrompt(request: Request) {
     data: {
       ...parsed.data,
       owner: session.user.id,
-      tags: parsed.data.tags?.map((tag) => ({ tag })),
+      tags: promptTagsToJson(parsed.data.tags),
     },
     req: { user: session.user },
   })
@@ -174,7 +175,7 @@ async function updatePrompt(request: Request) {
       collection: 'prompts',
       id: id as string,
       overrideAccess: false,
-      data: { ...parsed.data, tags: parsed.data.tags?.map((tag) => ({ tag })) },
+      data: { ...parsed.data, tags: promptTagsToJson(parsed.data.tags) },
       req: { user: session.user },
     })
     return Response.json({ prompt })

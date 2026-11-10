@@ -209,7 +209,9 @@ export function MediaStudioPage({
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [promptPickerOpen, setPromptPickerOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [selectedOutputIndex, setSelectedOutputIndex] = useState(0)
+  const [selectedOutputSelection, setSelectedOutputSelection] = useState<
+    { generationId: string; index: number } | undefined
+  >()
   const [assets, setAssets] = useState<StudioAsset[]>([])
   const [assetSearch, setAssetSearch] = useState('')
   const [prompts, setPrompts] = useState<Array<{ id: string; title: string; content: string }>>([])
@@ -223,10 +225,12 @@ export function MediaStudioPage({
   const supportsVideoReference =
     modality === 'video' && provider === 'replicate' && model === 'bytedance/seedance-2.5'
   const selectedAssets = generationOutputs(selected)
+  const selectedOutputIndex =
+    selectedOutputSelection && selectedOutputSelection.generationId === selected?.id
+      ? selectedOutputSelection.index
+      : 0
   const selectedAsset = selectedAssets[selectedOutputIndex] || selectedAssets[0]
   const selectedUrl = selectedAsset ? assetUrl(selectedAsset) : ''
-
-  useEffect(() => setSelectedOutputIndex(0), [selected?.id])
 
   const checkSelectedStatus = async (generation = selected) => {
     if (!generation?.providerTaskId || checkingStatus) return
@@ -983,7 +987,10 @@ export function MediaStudioPage({
                         type="button"
                         aria-label={t('Select image {count}', { count: index + 1 })}
                         aria-pressed={selectedOutputIndex === index}
-                        onClick={() => setSelectedOutputIndex(index)}
+                        onClick={() => {
+                          if (selected)
+                            setSelectedOutputSelection({ generationId: selected.id, index })
+                        }}
                         className={`relative size-16 overflow-hidden rounded-lg border-2 bg-zinc-100 ${selectedOutputIndex === index ? 'border-violet-500 ring-2 ring-violet-100' : 'border-zinc-200'}`}
                       >
                         <Image

@@ -71,7 +71,6 @@ export interface Config {
     admins: Admin;
     users: User;
     'admin-setup': AdminSetup;
-    'user-settings': UserSetting;
     media: Media;
     'signup-attempts': SignupAttempt;
     folders: Folder;
@@ -92,7 +91,6 @@ export interface Config {
     admins: AdminsSelect<false> | AdminsSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'admin-setup': AdminSetupSelect<false> | AdminSetupSelect<true>;
-    'user-settings': UserSettingsSelect<false> | UserSettingsSelect<true>;
     media: MediaSelect<false> | MediaSelect<true>;
     'signup-attempts': SignupAttemptsSelect<false> | SignupAttemptsSelect<true>;
     folders: FoldersSelect<false> | FoldersSelect<true>;
@@ -215,83 +213,6 @@ export interface Admin {
 export interface User {
   id: string;
   name?: string | null;
-  role?: ('user' | 'admin') | null;
-  storageQuotaBytes?: number | null;
-  storageUsedBytes?: number | null;
-  createdBy?:
-    | ({
-        relationTo: 'admins';
-        value: string | Admin;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: string | User;
-      } | null);
-  updatedBy?:
-    | ({
-        relationTo: 'admins';
-        value: string | Admin;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: string | User;
-      } | null);
-  updatedAt: string;
-  createdAt: string;
-  email: string;
-  resetPasswordToken?: string | null;
-  resetPasswordExpiration?: string | null;
-  salt?: string | null;
-  hash?: string | null;
-  resetPasswordRequestedAt?: string | null;
-  loginAttempts?: number | null;
-  lockUntil?: string | null;
-  sessions?:
-    | {
-        id: string;
-        createdAt?: string | null;
-        expiresAt: string;
-      }[]
-    | null;
-  password?: string | null;
-  collection: 'users';
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "admin-setup".
- */
-export interface AdminSetup {
-  id: string;
-  setupKey: string;
-  claimedBy: string | User;
-  createdBy?:
-    | ({
-        relationTo: 'admins';
-        value: string | Admin;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: string | User;
-      } | null);
-  updatedBy?:
-    | ({
-        relationTo: 'admins';
-        value: string | Admin;
-      } | null)
-    | ({
-        relationTo: 'users';
-        value: string | User;
-      } | null);
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "user-settings".
- */
-export interface UserSetting {
-  id: string;
-  owner?: (string | null) | User;
   locale?: ('en' | 'vi') | null;
   modelDefaults?:
     | {
@@ -347,6 +268,55 @@ export interface UserSetting {
     | number
     | boolean
     | null;
+  role?: ('user' | 'admin') | null;
+  storageQuotaBytes?: number | null;
+  storageUsedBytes?: number | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: string | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: string | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
+  collection: 'users';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "admin-setup".
+ */
+export interface AdminSetup {
+  id: string;
+  setupKey: string;
+  claimedBy: string | User;
   createdBy?:
     | ({
         relationTo: 'admins';
@@ -746,9 +716,12 @@ export interface Prompt {
   category?: string | null;
   tags?:
     | {
-        tag?: string | null;
-        id?: string | null;
-      }[]
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
     | null;
   createdBy?:
     | ({
@@ -806,10 +779,6 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'admin-setup';
         value: string | AdminSetup;
-      } | null)
-    | ({
-        relationTo: 'user-settings';
-        value: string | UserSetting;
       } | null)
     | ({
         relationTo: 'media';
@@ -962,6 +931,13 @@ export interface AdminsSelect<T extends boolean = true> {
  */
 export interface UsersSelect<T extends boolean = true> {
   name?: T;
+  locale?: T;
+  modelDefaults?: T;
+  imagePreferences?: T;
+  videoPreferences?: T;
+  audioPreferences?: T;
+  uiPreferences?: T;
+  providerCredentials?: T;
   role?: T;
   storageQuotaBytes?: T;
   storageUsedBytes?: T;
@@ -992,24 +968,6 @@ export interface UsersSelect<T extends boolean = true> {
 export interface AdminSetupSelect<T extends boolean = true> {
   setupKey?: T;
   claimedBy?: T;
-  createdBy?: T;
-  updatedBy?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "user-settings_select".
- */
-export interface UserSettingsSelect<T extends boolean = true> {
-  owner?: T;
-  locale?: T;
-  modelDefaults?: T;
-  imagePreferences?: T;
-  videoPreferences?: T;
-  audioPreferences?: T;
-  uiPreferences?: T;
-  providerCredentials?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -1147,12 +1105,7 @@ export interface PromptsSelect<T extends boolean = true> {
   description?: T;
   content?: T;
   category?: T;
-  tags?:
-    | T
-    | {
-        tag?: T;
-        id?: T;
-      };
+  tags?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
