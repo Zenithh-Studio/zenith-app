@@ -1,21 +1,4 @@
 services:
-  database:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-znith}
-      POSTGRES_USER: ${POSTGRES_USER:-znith}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-znith-local-postgres}
-    ports:
-      - '127.0.0.1:${POSTGRES_PORT:-55432}:5432'
-    volumes:
-      - database-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-znith} -d ${POSTGRES_DB:-znith}']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   chatgpt2api:
     image: ghcr.io/zenithh-studio/chatgpt2api:v3.2.3-en.1
     restart: unless-stopped
@@ -79,8 +62,6 @@ services:
         SITE_URL: ${SITE_URL:-http://localhost:3001}
     restart: unless-stopped
     depends_on:
-      database:
-        condition: service_healthy
       chatgpt2api:
         condition: service_healthy
       muse2api:
@@ -88,10 +69,6 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     environment:
-      DATABASE_URL: ${APP_DATABASE_URL:-postgresql://${POSTGRES_USER:-znith}:${POSTGRES_PASSWORD:-znith-local-postgres}@database:5432/${POSTGRES_DB:-znith}}
-      PAYLOAD_SECRET: ${PAYLOAD_SECRET:-}
-      APP_ADMIN_SETUP_TOKEN: ${APP_ADMIN_SETUP_TOKEN:-}
-      PAYLOAD_UPLOAD_DIR: /app/apps/studio/uploads
       SITE_URL: ${SITE_URL:-http://localhost:3001}
       NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3001}
       APP_CHATGPT2API_BASE_URL: ${APP_CHATGPT2API_BASE_URL:-http://chatgpt2api/v1}
@@ -104,8 +81,6 @@ services:
     ports:
       - '${APP_PORT:-3001}:3000'
     volumes:
-      - payload-uploads:/app/apps/studio/uploads
-      - payload-secrets:/app/apps/studio/data
       - muse2api-auth:/run/muse2api-auth:ro
     healthcheck:
       test:
@@ -113,7 +88,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3000/login').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 15s
       timeout: 5s
@@ -121,11 +96,8 @@ services:
       retries: 5
 
 volumes:
-  database-data:
   chatgpt2api-runtime:
   chatgpt2api-data:
   muse2api-data:
   muse2api-auth:
   muse2api-admin:
-  payload-uploads:
-  payload-secrets:
