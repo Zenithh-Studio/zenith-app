@@ -44,8 +44,7 @@ services:
       retries: 5
 
   muse2api:
-    build:
-      context: ./services/muse2api
+    image: ${MUSE2API_IMAGE:-ghcr.io/zenithh-studio/muse2api:main}
     restart: unless-stopped
     init: true
     shm_size: 1gb
@@ -57,10 +56,7 @@ services:
       - muse2api-admin:/run/muse2api-admin
     environment:
       MUSE2API_HOST: 0.0.0.0
-      MUSE2API_PORT: 18610
       MUSE2API_DRIVER: ${MUSE2API_DRIVER:-browser}
-      MUSE2API_DATA_DIR: /app/data
-      MUSE2API_CHROMIUM_PATH: /usr/local/bin/muse2api-chromium
       MUSE2API_API_KEY: ${APP_MUSE2API_API_KEY:-${MUSE2API_API_KEY:-}}
       MUSE2API_ADMIN_KEY: ${MUSE2API_ADMIN_KEY:-}
     healthcheck:
