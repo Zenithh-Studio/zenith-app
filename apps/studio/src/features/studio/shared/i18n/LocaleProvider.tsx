@@ -281,7 +281,12 @@ const additionalVietnamese: Record<string, string> = {
   'Uploaded media type must match the workflow output.':
     'Định dạng media phải khớp với đầu ra của quy trình.',
   'No matching media assets.': 'Không có media phù hợp trong Tài sản.',
-  'Changes are saved only when you click Save.': 'Thay đổi chỉ được lưu khi bạn nhấn Lưu.',
+  'Changes are saved when you click Save or Generate.':
+    'Thay đổi được lưu khi bạn nhấn Lưu hoặc Tạo.',
+  'Could not save automation before generation.': 'Không thể lưu automation trước khi bắt đầu tạo.',
+  'Could not save automation status.': 'Không thể lưu trạng thái automation.',
+  'Generated media, but the result could not be saved to this automation.':
+    'Media đã được tạo nhưng không thể lưu kết quả vào automation này.',
   'At most 20 prompts.': 'Tối đa 20 prompt.',
   ID: 'ID',
   Action: 'Thao tác',

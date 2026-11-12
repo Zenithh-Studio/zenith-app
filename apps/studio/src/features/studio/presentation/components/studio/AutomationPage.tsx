@@ -24,7 +24,6 @@ import {
   LoaderCircle,
   Plus,
   Play,
-  RotateCcw,
   Save,
   Trash2,
   Upload,
@@ -346,6 +345,8 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const automationRef = useRef<AutomationDocument | null>(null)
+  const editRevisionRef = useRef(0)
+  const savedRevisionRef = useRef(0)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRowIdRef = useRef('')
   const savePromiseRef = useRef<Promise<boolean> | null>(null)
@@ -369,6 +370,8 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
       }
       const loaded = automationBody.automation as AutomationDocument
       automationRef.current = loaded
+      editRevisionRef.current = 0
+      savedRevisionRef.current = 0
       setAutomation(loaded)
       setWorkflows((workflowBody.docs || []) as WorkflowDocument[])
     } catch (failure) {
@@ -392,13 +395,14 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
   const persistCurrent = async (): Promise<boolean> => {
     const snapshot = automationRef.current
     if (!snapshot) return false
+    if (savedRevisionRef.current >= editRevisionRef.current) return true
     if (savePromiseRef.current) {
       const activeSave = await savePromiseRef.current
       if (!activeSave) return false
-      if (automationRef.current !== snapshot) return persistCurrent()
-      return true
+      return savedRevisionRef.current >= editRevisionRef.current ? true : persistCurrent()
     }
 
+    const revision = editRevisionRef.current
     setSaving(true)
     const savePromise = (async () => {
       try {
@@ -414,10 +418,13 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
         if (!response.ok || !body.automation) {
           throw new Error(body.error || 'Could not save automation.')
         }
-        if (automationRef.current === snapshot) {
+        savedRevisionRef.current = Math.max(savedRevisionRef.current, revision)
+        if (automationRef.current === snapshot && editRevisionRef.current === revision) {
           automationRef.current = body.automation
           setAutomation(body.automation)
           setDirty(false)
+        } else {
+          setDirty(true)
         }
         setError('')
         return true
@@ -431,7 +438,7 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
     savePromiseRef.current = savePromise
     const succeeded = await savePromise
     if (savePromiseRef.current === savePromise) savePromiseRef.current = null
-    if (succeeded && automationRef.current !== snapshot) return persistCurrent()
+    if (succeeded && savedRevisionRef.current < editRevisionRef.current) return persistCurrent()
     return succeeded
   }
 
@@ -439,6 +446,7 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
     const current = automationRef.current
     if (!current) return
     const next = { ...update(current), updatedAt: new Date().toISOString() }
+    editRevisionRef.current += 1
     automationRef.current = next
     setAutomation(next)
     setDirty(true)
@@ -477,6 +485,25 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
         item.id === rowId ? { ...item, status: 'running', error: '' } : item,
       ),
     }))
+
+    if (!(await persistCurrent())) {
+      mutateAutomation((current) => ({
+        ...current,
+        records: current.records.map((item) =>
+          item.id === rowId
+            ? {
+                ...item,
+                status: 'failed',
+                error: t('Could not save automation before generation.'),
+              }
+            : item,
+        ),
+      }))
+      setRunningRowId('')
+      return false
+    }
+
+    let result: AutomationMediaResult
     try {
       const definition = structuredClone(workflow.definition)
       definition.nodes = definition.nodes.map((node) =>
@@ -500,21 +527,28 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
           ? (output.value as Record<string, unknown>)
           : { url: output.value }
       const metadata = output.metadata || {}
-      const result: AutomationMediaResult = {
+      const assetId =
+        (typeof output.assetId === 'string' && output.assetId) ||
+        (typeof data.assetId === 'string' && data.assetId) ||
+        (typeof metadata.assetId === 'string' && metadata.assetId) ||
+        undefined
+      const storageKey =
+        (typeof data.storageKey === 'string' && data.storageKey) ||
+        (typeof data.fileId === 'string' && data.fileId) ||
+        (typeof metadata.storageKey === 'string' && metadata.storageKey) ||
+        (typeof metadata.fileId === 'string' && metadata.fileId) ||
+        undefined
+      const fileName =
+        (typeof data.fileName === 'string' && data.fileName) ||
+        (typeof data.filename === 'string' && data.filename) ||
+        (typeof metadata.fileName === 'string' && metadata.fileName) ||
+        (typeof metadata.filename === 'string' && metadata.filename) ||
+        undefined
+      result = {
         type: plan.mediaType,
-        ...(typeof output.assetId === 'string' ? { assetId: output.assetId } : {}),
-        ...(typeof data.storageKey === 'string'
-          ? { storageKey: data.storageKey }
-          : typeof metadata.storageKey === 'string'
-            ? { storageKey: metadata.storageKey }
-            : {}),
-        ...(typeof data.fileName === 'string'
-          ? { fileName: data.fileName }
-          : typeof metadata.fileName === 'string'
-            ? { fileName: metadata.fileName }
-            : typeof metadata.filename === 'string'
-              ? { fileName: metadata.filename }
-              : {}),
+        ...(assetId ? { assetId } : {}),
+        ...(storageKey ? { storageKey } : {}),
+        ...(fileName ? { fileName } : {}),
         ...(typeof data.mimeType === 'string'
           ? { mimeType: data.mimeType }
           : typeof metadata.mimeType === 'string'
@@ -535,19 +569,6 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
       if (!result.assetId && !result.storageKey && !result.url) {
         throw new Error('The workflow result does not contain a readable media asset.')
       }
-      const latestURL = await resolveLocalMediaUrl(
-        result.assetId || '',
-        result.fileName,
-        result.storageKey,
-      )
-      if (latestURL) setResolvedResults((current) => ({ ...current, [rowId]: latestURL }))
-      mutateAutomation((current) => ({
-        ...current,
-        records: current.records.map((item) =>
-          item.id === rowId ? { ...item, status: 'succeeded', result, error: '' } : item,
-        ),
-      }))
-      return true
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'Workflow generation failed.'
       mutateAutomation((current) => ({
@@ -1084,18 +1105,6 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
                                     )}
                                   </button>
                                 )}
-                                {row.result && (
-                                  <button
-                                    type="button"
-                                    aria-label={t('Clear result')}
-                                    title={t('Clear result')}
-                                    onClick={() => clearRowResult(row.id)}
-                                    disabled={busy}
-                                    className="grid size-8 place-items-center rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
-                                  >
-                                    <RotateCcw size={14} />
-                                  </button>
-                                )}
                                 <button
                                   type="button"
                                   aria-label={`${t('Delete row')} ${index + 1}`}
@@ -1153,27 +1162,39 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
                                     <span className="mt-1 block">
                                       {formatLocaleDate(row.result.createdAt, locale)}
                                     </span>
-                                    {mediaURL && (
+                                    <div className="mt-2 flex items-center gap-1">
+                                      {mediaURL && (
+                                        <button
+                                          type="button"
+                                          aria-label={t('View media')}
+                                          title={t('View media')}
+                                          onClick={() =>
+                                            setPreviewResult({
+                                              url: mediaURL,
+                                              type: row.result!.type,
+                                              fileName:
+                                                row.result!.fileName ||
+                                                (row.result!.type === 'video'
+                                                  ? t('Video')
+                                                  : t('Image')),
+                                            })
+                                          }
+                                          className="grid size-7 place-items-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                                        >
+                                          <Eye size={14} />
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
-                                        aria-label={t('View media')}
-                                        title={t('View media')}
-                                        onClick={() =>
-                                          setPreviewResult({
-                                            url: mediaURL,
-                                            type: row.result!.type,
-                                            fileName:
-                                              row.result!.fileName ||
-                                              (row.result!.type === 'video'
-                                                ? t('Video')
-                                                : t('Image')),
-                                          })
-                                        }
-                                        className="mt-2 grid size-7 place-items-center rounded-md border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                                        aria-label={t('Clear result')}
+                                        title={t('Clear result')}
+                                        onClick={() => clearRowResult(row.id)}
+                                        disabled={busy}
+                                        className="grid size-7 place-items-center rounded-md border border-zinc-200 text-zinc-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
                                       >
-                                        <Eye size={14} />
+                                        <Trash2 size={13} />
                                       </button>
-                                    )}
+                                    </div>
                                   </div>
                                 </div>
                               ) : row.status === 'failed' ? (
@@ -1227,7 +1248,7 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
                   <span>
                     {t('Rows with an existing result are skipped when you generate all.')}
                   </span>
-                  <span>{t('Changes are saved only when you click Save.')}</span>
+                  <span>{t('Changes are saved when you click Save or Generate.')}</span>
                   <span>{t('At most 20 prompts.')}</span>
                 </footer>
               </section>
