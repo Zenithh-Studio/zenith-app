@@ -8,6 +8,7 @@
 
 export const studioStores = [
   'workflows',
+  'automations',
   'executions',
   'prompts',
   'textAssets',
@@ -22,13 +23,14 @@ export type StudioStore = (typeof studioStores)[number]
 export type StudioRecord = { id: string; [key: string]: unknown }
 
 const DATABASE_NAME = 'zenith-studio'
-const DATABASE_VERSION = 4
+const DATABASE_VERSION = 5
 let databasePromise: Promise<IDBDatabase> | undefined
 
 const storeIndexes: Partial<
   Record<StudioStore, Array<{ name: string; keyPath: string | string[] }>>
 > = {
   workflows: [{ name: 'updatedAt', keyPath: 'updatedAt' }],
+  automations: [{ name: 'updatedAt', keyPath: 'updatedAt' }],
   executions: [
     { name: 'workflowId', keyPath: 'workflowId' },
     { name: 'workflowStartedAt', keyPath: ['workflowId', 'startedAt'] },

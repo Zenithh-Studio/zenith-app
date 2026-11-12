@@ -38,6 +38,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
+function hasStableMediaReference(node: WorkflowDefinition['nodes'][number]) {
+  return Boolean(node.config.assetId || node.config.storageKey || node.config.fileId)
+}
+
+function snapshotWorkflowDefinition(definition: WorkflowDefinition): WorkflowDefinition {
+  const mediaInputTypes = new Set(['input.image', 'input.video', 'input.audio'])
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => {
+      if (
+        !mediaInputTypes.has(node.type) ||
+        !hasStableMediaReference(node) ||
+        typeof node.config.url !== 'string' ||
+        !node.config.url.startsWith('data:')
+      ) {
+        return node
+      }
+      return { ...node, config: { ...node.config, url: '' } }
+    }),
+  }
+}
+
+function stripInlineInputMedia(records: NodeExecutionRecord[], definition: WorkflowDefinition) {
+  const mediaInputTypes = new Set(['input.image', 'input.video', 'input.audio'])
+  const localMediaNodeIds = new Set(
+    definition.nodes
+      .filter(
+        (node) =>
+          mediaInputTypes.has(node.type) &&
+          hasStableMediaReference(node) &&
+          typeof node.config.url === 'string' &&
+          node.config.url.startsWith('data:'),
+      )
+      .map((node) => node.id),
+  )
+
+  return records.map((record) => {
+    if (!record.outputs || !localMediaNodeIds.has(record.nodeId)) return record
+    return {
+      ...record,
+      outputs: Object.fromEntries(
+        Object.entries(record.outputs).map(([key, output]) => {
+          if (!['image', 'video', 'audio'].includes(output.type) || !isRecord(output.value)) {
+            return [key, output]
+          }
+          return [key, { ...output, value: { ...output.value, url: '' } }]
+        }),
+      ),
+    }
+  })
+}
+
 function isPrivateAddress(address: string) {
   if (
     address === '::1' ||
@@ -179,7 +231,10 @@ async function executeWorkflow(request: Request, context: RouteContext) {
         }),
     )
     const completedAt = new Date()
-    const localRecords = await inlineExecutionMedia(result.records)
+    const localRecords = stripInlineInputMedia(
+      await inlineExecutionMedia(result.records),
+      definition,
+    )
     const execution: ExecutionDocument & { workflowId: string } = {
       id: executionId,
       workflow: id,
@@ -189,7 +244,7 @@ async function executeWorkflow(request: Request, context: RouteContext) {
       startedAt: startedAt.toISOString(),
       completedAt: completedAt.toISOString(),
       durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
-      snapshot: definition,
+      snapshot: snapshotWorkflowDefinition(definition),
       nodeRecords: localRecords,
       logs: result.logs,
       ...(result.error ? { error: result.error } : {}),

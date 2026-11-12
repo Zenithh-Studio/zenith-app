@@ -122,21 +122,79 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
+async function inlineBrowserMediaUrl(url: string) {
+  if (!url.startsWith('blob:')) return url
+  const response = await networkFetch(url)
+  if (!response.ok) {
+    throw new Error('A workflow reference image could not be read from browser storage.')
+  }
+  return blobToDataUrl(await response.blob())
+}
+
 function mediaData(value: NodeValue) {
   return value.value && typeof value.value === 'object'
     ? (value.value as Record<string, unknown>)
     : { url: value.value }
 }
 
-async function mediaObjectUrl(record: StudioRecord) {
-  const cached = mediaUrlCache.get(record.id)
+function createMediaObjectUrl(record: StudioRecord, blob: Blob) {
+  const storageKey = typeof record.fileId === 'string' ? record.fileId : ''
+  const cached = storageKey ? mediaUrlCache.get(storageKey) : mediaUrlCache.get(record.id)
   if (cached) return cached
-  if (typeof record.fileId !== 'string') return String(record.url || '')
-  const file = await getAssetFile(record.fileId)
-  if (!file?.blob) return String(record.url || '')
-  const url = URL.createObjectURL(file.blob)
+  const url = URL.createObjectURL(blob)
   mediaUrlCache.set(record.id, url)
+  if (storageKey) mediaUrlCache.set(storageKey, url)
   return url
+}
+
+async function mediaObjectUrl(
+  record: StudioRecord,
+  storedFile?: Awaited<ReturnType<typeof getAssetFile>>,
+) {
+  if (typeof record.fileId !== 'string') return String(record.url || '')
+  const cached = mediaUrlCache.get(record.fileId)
+  if (cached) return cached
+  const file = storedFile ?? (await getAssetFile(record.fileId))
+  return file?.blob ? createMediaObjectUrl(record, file.blob) : String(record.url || '')
+}
+
+/** Rebuild a current-page object URL from a stable media key or asset record. */
+export async function resolveLocalMediaUrl(
+  assetId: string,
+  filename?: string,
+  storageKey?: string,
+) {
+  if (typeof window === 'undefined') return null
+
+  if (storageKey) {
+    const fileId = storageKey.startsWith('media:') ? storageKey.slice('media:'.length) : storageKey
+    const file = await getAssetFile(fileId)
+    if (file?.blob) {
+      return createMediaObjectUrl({ id: assetId || fileId, fileId }, file.blob)
+    }
+  }
+
+  const asset = assetId ? await getRecord('media', assetId) : null
+  if (asset && typeof asset.fileId === 'string') {
+    const file = await getAssetFile(asset.fileId)
+    if (file?.blob) return mediaObjectUrl(asset, file)
+  }
+
+  if (!filename) return null
+  const assets = await listRecords<StudioRecord>('media', {
+    index: 'createdAt',
+    direction: 'prev',
+  })
+  const matchingAssets = assets.filter(
+    (candidate) =>
+      String(candidate.filename || '').toLocaleLowerCase() === filename.toLocaleLowerCase() &&
+      typeof candidate.fileId === 'string',
+  )
+  for (const candidate of matchingAssets) {
+    const file = await getAssetFile(String(candidate.fileId))
+    if (file?.blob) return mediaObjectUrl(candidate, file)
+  }
+  return null
 }
 
 function generationOutputMetadata(value: unknown) {
@@ -226,7 +284,20 @@ async function persistMediaValue(value: NodeValue): Promise<NodeValue> {
   const sourceUrl = typeof data.url === 'string' ? data.url : ''
   if (value.assetId) {
     const existing = await getRecord('media', value.assetId)
-    if (existing) return { ...value, value: { ...data, url: await mediaObjectUrl(existing) } }
+    if (existing) {
+      return {
+        ...value,
+        value: {
+          ...data,
+          url: await mediaObjectUrl(existing),
+          ...(typeof existing.fileId === 'string' ? { storageKey: existing.fileId } : {}),
+        },
+        metadata: {
+          ...(value.metadata || {}),
+          ...(typeof existing.fileId === 'string' ? { storageKey: existing.fileId } : {}),
+        },
+      }
+    }
   }
   let blob: Blob | undefined
   if (sourceUrl.startsWith('data:')) blob = dataUrlToBlob(sourceUrl)
@@ -253,22 +324,55 @@ async function persistMediaValue(value: NodeValue): Promise<NodeValue> {
     createdAt: now,
     updatedAt: now,
   }
-  await saveMediaAsset(blob, record)
-  const url = URL.createObjectURL(blob)
-  mediaUrlCache.set(id, url)
+  const saved = await saveMediaAsset(blob, record)
+  const url = createMediaObjectUrl(saved, blob)
   return {
     ...value,
     assetId: id,
-    value: { ...data, url, fileName: filename, mimeType: record.mimeType, bytes: blob.size },
-    metadata: { ...(value.metadata || {}), assetId: id, filename, mimeType: record.mimeType },
+    value: {
+      ...data,
+      url,
+      storageKey: saved.fileId,
+      fileName: filename,
+      mimeType: record.mimeType,
+      bytes: blob.size,
+    },
+    metadata: {
+      ...(value.metadata || {}),
+      assetId: id,
+      storageKey: saved.fileId,
+      filename,
+      mimeType: record.mimeType,
+    },
   }
 }
 
 async function hydrateNodeValue(value: NodeValue): Promise<NodeValue> {
+  const data = mediaData(value)
+  const storageKey =
+    (typeof data.storageKey === 'string' && data.storageKey) ||
+    (typeof data.fileId === 'string' && data.fileId) ||
+    (typeof value.metadata?.storageKey === 'string' && value.metadata.storageKey) ||
+    ''
+  if (storageKey) {
+    const url = await resolveLocalMediaUrl('', undefined, storageKey)
+    if (url) return { ...value, value: { ...data, url, storageKey } }
+  }
   if (!value.assetId) return value
   const record = await getRecord('media', value.assetId)
   if (!record) return value
-  return { ...value, value: { ...mediaData(value), url: await mediaObjectUrl(record) } }
+  return {
+    ...value,
+    value: {
+      ...data,
+      url: await mediaObjectUrl(record),
+      ...(typeof record.fileId === 'string' ? { storageKey: record.fileId } : {}),
+    },
+    metadata: {
+      ...(value.metadata || {}),
+      ...(typeof record.fileId === 'string' ? { storageKey: record.fileId } : {}),
+    },
+  }
 }
 
 async function hydrateExecution<T extends StudioRecord>(execution: T) {
@@ -295,7 +399,11 @@ async function hydrateExecution<T extends StudioRecord>(execution: T) {
 async function persistMediaDocument(asset: StudioRecord) {
   const sourceUrl = typeof asset.url === 'string' ? asset.url : ''
   if (typeof asset.fileId === 'string' && (await getAssetFile(asset.fileId))) {
-    const existing = { ...asset, source: asset.source || 'studio' }
+    const existing = {
+      ...asset,
+      source: asset.source || 'studio',
+      storageKey: asset.fileId,
+    }
     await putRecord('media', existing)
     return { ...existing, url: await mediaObjectUrl(existing) }
   }
@@ -319,9 +427,8 @@ async function persistMediaDocument(asset: StudioRecord) {
     updatedAt: new Date().toISOString(),
   }
   const saved = await saveMediaAsset(blob, record)
-  const url = URL.createObjectURL(blob)
-  mediaUrlCache.set(id, url)
-  return { ...saved, url }
+  const url = createMediaObjectUrl(saved, blob)
+  return { ...saved, storageKey: saved.fileId, url }
 }
 
 async function generationsApi(url: URL, method: string, init?: RequestInit) {
@@ -385,6 +492,8 @@ async function generationsApi(url: URL, method: string, init?: RequestInit) {
       provider: config.provider,
       model: config.model,
       prompt: config.prompt,
+      systemPrompt: config.systemPrompt,
+      userPrompt: config.userPrompt,
       aspectRatio: config.aspectRatio,
       quality: config.quality,
       duration: config.duration,
@@ -487,11 +596,45 @@ async function hydrateWorkflow(workflow: StudioRecord): Promise<StudioRecord> {
     if (Array.isArray(value)) return Promise.all(value.map(walk))
     if (!value || typeof value !== 'object') return value
     const object = value as Record<string, unknown>
-    if (typeof object.assetId === 'string' && 'value' in object)
-      return hydrateNodeValue(object as unknown as NodeValue)
-    if (typeof object.assetId === 'string' && typeof object.url === 'string') {
+    if (typeof object.assetId === 'string' && 'value' in object) {
+      const hydrated = await hydrateNodeValue(object as unknown as NodeValue)
+      const data = mediaData(hydrated)
+      return {
+        ...hydrated,
+        value: { ...data, url: await inlineBrowserMediaUrl(String(data.url || '')) },
+      }
+    }
+    const storageKey =
+      (typeof object.storageKey === 'string' && object.storageKey) ||
+      (typeof object.fileId === 'string' && object.fileId) ||
+      ''
+    if (storageKey) {
+      const fileId = storageKey.startsWith('media:')
+        ? storageKey.slice('media:'.length)
+        : storageKey
+      const file = await getAssetFile(fileId)
+      if (file?.blob) {
+        const record =
+          typeof object.assetId === 'string' ? await getRecord('media', object.assetId) : null
+        return {
+          ...object,
+          url: await blobToDataUrl(file.blob),
+          ...(record && typeof record.fileId === 'string' ? { storageKey: record.fileId } : {}),
+        }
+      }
+    }
+    if (typeof object.assetId === 'string') {
       const record = await getRecord('media', object.assetId)
-      return record ? { ...object, url: await mediaObjectUrl(record) } : object
+      return record
+        ? {
+            ...object,
+            ...(typeof record.fileId === 'string' ? { storageKey: record.fileId } : {}),
+            url: await inlineBrowserMediaUrl(await mediaObjectUrl(record)),
+          }
+        : object
+    }
+    if (typeof object.url === 'string' && object.url.startsWith('blob:')) {
+      return { ...object, url: await inlineBrowserMediaUrl(object.url) }
     }
     return Object.fromEntries(
       await Promise.all(
@@ -606,6 +749,84 @@ async function workflowsApi(url: URL, method: string, init?: RequestInit) {
   return null
 }
 
+async function automationsApi(url: URL, method: string, init?: RequestInit) {
+  const route = url.pathname.match(/^\/api\/studio\/automations(?:\/([^/]+))?$/)
+  if (!route) return null
+  const id = route[1] ? decodeURIComponent(route[1]) : undefined
+
+  if (method === 'GET' && !id) {
+    const docs = (await listRecords('automations', {
+      index: 'updatedAt',
+      direction: 'prev',
+    })) as StudioRecord[]
+    return json({ docs })
+  }
+  if (method === 'POST' && !id) {
+    const body = (await readJson(init)) as Record<string, unknown> | null
+    if (!body) return json({ error: 'Enter valid automation details.' }, 400)
+    const now = new Date().toISOString()
+    const automation = {
+      id: crypto.randomUUID(),
+      name: String(body.name || 'Untitled automation')
+        .trim()
+        .slice(0, 120),
+      workflowId: '',
+      records: [{ id: crypto.randomUUID(), userPrompt: '', result: null, status: 'idle' }],
+      createdAt: now,
+      updatedAt: now,
+    }
+    await putRecord('automations', automation)
+    return json({ automation }, 201)
+  }
+  if (!id) return null
+
+  const automation = (await getRecord('automations', id)) as StudioRecord | null
+  if (method === 'GET') {
+    return automation ? json({ automation }) : notFound('Automation not found.')
+  }
+  if (method === 'PATCH') {
+    if (!automation) return notFound('Automation not found.')
+    const body = (await readJson(init)) as Record<string, unknown> | null
+    if (!body) return json({ error: 'Enter valid automation settings.' }, 400)
+    if (Array.isArray(body.records) && body.records.length > 20) {
+      return json({ error: 'An automation can contain at most 20 user prompts.' }, 400)
+    }
+    const records = Array.isArray(body.records)
+      ? body.records.map((entry) => {
+          const row = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {}
+          return {
+            id: typeof row.id === 'string' && row.id ? row.id : crypto.randomUUID(),
+            userPrompt: typeof row.userPrompt === 'string' ? row.userPrompt.slice(0, 50_000) : '',
+            result:
+              row.result && typeof row.result === 'object' ? (row.result as StudioRecord) : null,
+            status:
+              row.status === 'running' || row.status === 'failed' || row.status === 'succeeded'
+                ? row.status
+                : 'idle',
+            ...(typeof row.error === 'string' && row.error
+              ? { error: row.error.slice(0, 2000) }
+              : {}),
+          }
+        })
+      : undefined
+    const next: StudioRecord = {
+      ...automation,
+      ...(typeof body.name === 'string' ? { name: body.name.trim().slice(0, 120) } : {}),
+      ...(typeof body.workflowId === 'string' ? { workflowId: body.workflowId } : {}),
+      ...(records ? { records } : {}),
+      updatedAt: new Date().toISOString(),
+    }
+    await putRecord('automations', next)
+    return json({ automation: next })
+  }
+  if (method === 'DELETE') {
+    if (!automation) return notFound('Automation not found.')
+    await deleteRecord('automations', id)
+    return new Response(null, { status: 204 })
+  }
+  return null
+}
+
 async function workflowSubrouteApi(url: URL, method: string, init?: RequestInit) {
   const match = url.pathname.match(
     /^\/api\/studio\/workflows\/([^/]+)\/(execute|status|save-output)$/,
@@ -618,8 +839,15 @@ async function workflowSubrouteApi(url: URL, method: string, init?: RequestInit)
     const workflow = await getRecord('workflows', id)
     if (!workflow) return notFound('Workflow not found.')
     const input = (await readJson(init)) as Record<string, unknown> | null
+    const { workflowDefinition, ...executionInput } = input || {}
     const credentials = await readLocalProviderCredentials()
-    const hydrated = await hydrateWorkflow(workflow)
+    const definition =
+      workflowDefinition &&
+      typeof workflowDefinition === 'object' &&
+      !Array.isArray(workflowDefinition)
+        ? workflowDefinition
+        : workflow.definition
+    const hydrated = await hydrateWorkflow({ ...workflow, definition })
     const credentialPayload = {
       keys: Object.fromEntries(
         Object.entries(credentials)
@@ -635,7 +863,7 @@ async function workflowSubrouteApi(url: URL, method: string, init?: RequestInit)
     const response = await networkFetch(url, {
       ...init,
       body: JSON.stringify({
-        ...(input || {}),
+        ...executionInput,
         workflow: hydrated,
         credentials: credentialPayload,
       }),
@@ -798,8 +1026,13 @@ async function textAssetsApi(url: URL, method: string, init?: RequestInit) {
 }
 
 function publicMedia(record: StudioRecord, blob?: Blob | null) {
-  const media = { ...record }
-  if (blob) media.url = URL.createObjectURL(blob)
+  const media: StudioRecord = {
+    ...record,
+    ...(typeof record.fileId === 'string' ? { storageKey: record.fileId } : {}),
+  }
+  if (blob) {
+    media.url = createMediaObjectUrl(record, blob)
+  }
   return media
 }
 
@@ -904,9 +1137,11 @@ async function assetsApi(url: URL, method: string, init?: RequestInit) {
     const removed = media.filter((item) => assetIds.includes(item.id))
     await deleteMediaAssets(removed)
     for (const item of removed) {
-      const objectUrl = mediaUrlCache.get(item.id)
+      const fileId = typeof item.fileId === 'string' ? item.fileId : ''
+      const objectUrl = mediaUrlCache.get(fileId) || mediaUrlCache.get(item.id)
       if (objectUrl) URL.revokeObjectURL(objectUrl)
       mediaUrlCache.delete(item.id)
+      if (fileId) mediaUrlCache.delete(fileId)
     }
     return json({ deletedIds: removed.map((item) => item.id) })
   }
@@ -1015,9 +1250,8 @@ async function videoFramesApi(url: URL, method: string, init?: RequestInit) {
   })) as StudioRecord
   const blob = await getAssetFile(String(media.fileId))
   if (blob?.blob) {
-    const objectUrl = URL.createObjectURL(blob.blob)
-    mediaUrlCache.set(media.id, objectUrl)
-    media.url = objectUrl
+    media.storageKey = media.fileId
+    media.url = createMediaObjectUrl(media, blob.blob)
   }
   return json({ media }, 201)
 }
@@ -1107,6 +1341,7 @@ export async function studioFetch(input: RequestInfo | URL, init?: RequestInit):
     const localResponse =
       (await workflowSubrouteApi(url, method, init)) ||
       (await workflowsApi(url, method, init)) ||
+      (await automationsApi(url, method, init)) ||
       (await productionsApi(url, method, init)) ||
       (await generationsApi(url, method, init)) ||
       (await promptsApi(url, method, init)) ||

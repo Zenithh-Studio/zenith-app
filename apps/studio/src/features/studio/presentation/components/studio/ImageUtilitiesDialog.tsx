@@ -35,6 +35,7 @@ export type ImageToolAction =
 export type DerivedImageAsset = {
   id: string
   url?: string | null
+  storageKey?: string
   filename?: string | null
   mimeType?: string | null
   alt: string

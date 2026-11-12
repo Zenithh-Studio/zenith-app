@@ -82,18 +82,21 @@ const viewOptions: Array<{ value: AssetView; label: string; Icon: typeof List }>
 
 function mediaSource(asset: AssetDocument) {
   const source = asset.url || ''
+  if (!source) return ''
+  if (source.startsWith('blob:') || source.startsWith('data:')) return source
+
   if (source) {
     try {
       const parsed = new URL(source, 'http://payload.local')
-      if (parsed.pathname.startsWith('/api/media/file/')) {
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`
-      }
+      if (parsed.pathname.startsWith('/api/media/file/')) return ''
+      if (parsed.origin !== 'http://payload.local') return source
+      if (source.startsWith('/')) return source
     } catch {
-      // Fall back to the saved filename if the asset URL is malformed.
+      return source
     }
   }
 
-  return asset.filename ? `/api/media/file/${encodeURIComponent(asset.filename)}` : source
+  return source
 }
 
 function AssetPreview({ asset, source }: { asset: AssetDocument; source: string }) {
