@@ -1,3 +1,5 @@
+name: zenith
+
 services:
   chatgpt2api:
     image: ghcr.io/zenithh-studio/chatgpt2api:v3.2.3-en.1
