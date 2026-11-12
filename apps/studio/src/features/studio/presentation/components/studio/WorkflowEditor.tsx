@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { resolveLocalMediaUrl, studioFetch } from '@/lib/studio-local-api'
 import { getRecord, updateRecord } from '@/lib/studio-indexed-db'
 import type { StudioRecord } from '@/lib/studio-indexed-db'
@@ -1171,7 +1172,7 @@ function NodeActionToolbar({
               )}
             >
               <span className="sr-only">{t('Aspect ratio')}</span>
-              <select
+              <DropdownSelect
                 aria-label={t('Aspect ratio')}
                 value={aspectRatioValue || String(config.aspectRatio || '1:1')}
                 onChange={(event) => {
@@ -1191,7 +1192,7 @@ function NodeActionToolbar({
                 {ratioOptions.map((ratio) => (
                   <option key={ratio}>{ratio}</option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
           )}
           {aspectRatioValue !== undefined ? (
@@ -1227,7 +1228,7 @@ function NodeActionToolbar({
               title={t('Choose the generated image quality.')}
             >
               <span className="sr-only">{t('Quality')}</span>
-              <select
+              <DropdownSelect
                 aria-label={t('Quality')}
                 value={String(config.quality || 'standard')}
                 onChange={(event) => update({ quality: event.target.value })}
@@ -1236,7 +1237,7 @@ function NodeActionToolbar({
                 {['draft', 'standard', 'high'].map((quality) => (
                   <option key={quality}>{t(quality)}</option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
           )}
           {'duration' in config && (
@@ -1245,7 +1246,7 @@ function NodeActionToolbar({
               title={t('Set the generated video duration in seconds.')}
             >
               <span className="sr-only">{t('Duration')}</span>
-              <select
+              <DropdownSelect
                 aria-label={t('Duration')}
                 value={String(
                   durationOptions.includes(Number(config.duration))
@@ -1260,7 +1261,7 @@ function NodeActionToolbar({
                     {t('{count} seconds', { count: duration })}
                   </option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
           )}
           {isVideoGenerator && (
@@ -1273,7 +1274,7 @@ function NodeActionToolbar({
               }
             >
               <span className="sr-only">{t('Video resolution')}</span>
-              <select
+              <DropdownSelect
                 aria-label={t('Video resolution')}
                 value={String(config.resolution || '720p')}
                 disabled={!supportsResolution}
@@ -1295,7 +1296,7 @@ function NodeActionToolbar({
                     {resolution}
                   </option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
           )}
           {isVideoGenerator && supportsAudioToggle && (
@@ -1714,7 +1715,7 @@ function NodeActionToolbar({
                   <>
                     <label className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[10px] text-zinc-600">
                       <span>Frame source</span>
-                      <select
+                      <DropdownSelect
                         aria-label="Video frame source"
                         value={frameMode}
                         disabled={capturingFrame}
@@ -1726,7 +1727,7 @@ function NodeActionToolbar({
                         <option value="first">{t('First frame')}</option>
                         <option value="current">{t('Current frame')}</option>
                         <option value="last">{t('Last frame')}</option>
-                      </select>
+                      </DropdownSelect>
                     </label>
                     <MenuItem
                       icon={ImagePlus}
@@ -2067,7 +2068,7 @@ function WorkflowGroupInspector({
       </label>
       <label className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
         {t('Group color')}
-        <select
+        <DropdownSelect
           value={group.color || '#7668b1'}
           onChange={(event) => onUpdate({ color: event.target.value })}
           className="mt-1.5 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs font-normal normal-case text-zinc-700"
@@ -2077,7 +2078,7 @@ function WorkflowGroupInspector({
           <option value="#b76b30">{t('Amber')}</option>
           <option value="#537399">{t('Blue')}</option>
           <option value="#a64f66">{t('Rose')}</option>
-        </select>
+        </DropdownSelect>
       </label>
       <div className="mt-5 flex items-center justify-between">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -2123,7 +2124,7 @@ function WorkflowGroupInspector({
       <div className="mt-3 flex items-center justify-between gap-2">
         <label className="min-w-0 flex-1">
           <span className="sr-only">{t('Add an ungrouped workflow node')}</span>
-          <select
+          <DropdownSelect
             aria-label={t('Add node to group')}
             value=""
             disabled={!availableNodes.length}
@@ -2140,7 +2141,7 @@ function WorkflowGroupInspector({
                 {node.name}
               </option>
             ))}
-          </select>
+          </DropdownSelect>
         </label>
         <button
           type="button"
@@ -6478,7 +6479,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                           {key.replaceAll(/([A-Z])/g, ' $1')}
                         </span>
                         {key === 'provider' ? (
-                          <select
+                          <DropdownSelect
                             value={String(value)}
                             onChange={(event) => {
                               const provider = providersFor('text').find(
@@ -6498,7 +6499,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                                 {provider.name}
                               </option>
                             ))}
-                          </select>
+                          </DropdownSelect>
                         ) : typeof value === 'string' &&
                           (key === 'value' ||
                             key.toLowerCase().includes('prompt') ||
@@ -7299,7 +7300,7 @@ function MediaConfiguration({
             <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Provider
             </span>
-            <select
+            <DropdownSelect
               value={String(config.provider || providers[0]?.id || '')}
               onChange={(event) => {
                 const provider = providers.find((item) => item.id === event.target.value)
@@ -7336,7 +7337,7 @@ function MediaConfiguration({
                   {provider.name}
                 </option>
               ))}
-            </select>
+            </DropdownSelect>
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -7369,7 +7370,7 @@ function MediaConfiguration({
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Voice
-              <select
+              <DropdownSelect
                 value={String(config.voice || 'alloy')}
                 onChange={(event) => onChange('voice', event.target.value)}
                 className="mt-1.5 h-10 w-full rounded-xl border border-zinc-200 bg-white px-2 text-xs font-normal normal-case text-zinc-700"
@@ -7388,11 +7389,11 @@ function MediaConfiguration({
                 ].map((voice) => (
                   <option key={voice}>{voice}</option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Format
-              <select
+              <DropdownSelect
                 value={String(config.format || 'mp3')}
                 onChange={(event) => onChange('format', event.target.value)}
                 className="mt-1.5 h-10 w-full rounded-xl border border-zinc-200 bg-white px-2 text-xs font-normal normal-case text-zinc-700"
@@ -7400,7 +7401,7 @@ function MediaConfiguration({
                 {['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm'].map((format) => (
                   <option key={format}>{format}</option>
                 ))}
-              </select>
+              </DropdownSelect>
             </label>
           </div>
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -7457,7 +7458,7 @@ function MediaConfiguration({
         <div className="space-y-3 rounded-xl border border-zinc-100 p-3">
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Resolution
-            <select
+            <DropdownSelect
               value={imageResolution}
               onChange={(event) => {
                 const dimensions = imageSizeFromSettings(event.target.value, imageAspectRatio)
@@ -7473,7 +7474,7 @@ function MediaConfiguration({
                   {resolution === 'auto' ? 'Auto' : resolution.toUpperCase()}
                 </option>
               ))}
-            </select>
+            </DropdownSelect>
           </label>
           <div>
             <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -7571,7 +7572,7 @@ function MediaConfiguration({
             Model
           </span>
           {hasModelOptions ? (
-            <select
+            <DropdownSelect
               aria-label="Model"
               value={currentModel || providerModels[0]}
               onChange={(event) => {
@@ -7607,7 +7608,7 @@ function MediaConfiguration({
                   {displayModelName(providerModel)}
                 </option>
               ))}
-            </select>
+            </DropdownSelect>
           ) : (
             <input
               value={currentModel}
@@ -7662,7 +7663,7 @@ function MediaConfiguration({
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Duration (seconds)
           </span>
-          <select
+          <DropdownSelect
             value={String(
               modelDurationOptions(
                 String(config.provider || ''),
@@ -7684,7 +7685,7 @@ function MediaConfiguration({
                 </option>
               ),
             )}
-          </select>
+          </DropdownSelect>
         </label>
       )}
     </div>

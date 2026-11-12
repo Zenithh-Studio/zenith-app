@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import type {
   AssetDocument,
   NodeExecutionRecord,
@@ -577,11 +578,30 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
           item.id === rowId ? { ...item, status: 'failed', error: message } : item,
         ),
       }))
-      setError(message)
+      const saved = await persistCurrent()
+      setError(saved ? message : `${message} ${t('Could not save automation status.')}`)
       return false
     } finally {
       setRunningRowId('')
     }
+
+    mutateAutomation((current) => ({
+      ...current,
+      records: current.records.map((item) =>
+        item.id === rowId ? { ...item, status: 'succeeded', result, error: '' } : item,
+      ),
+    }))
+    if (!(await persistCurrent())) {
+      setError(t('Generated media, but the result could not be saved to this automation.'))
+      return false
+    }
+    const latestURL = await resolveLocalMediaUrl(
+      result.assetId || '',
+      result.fileName,
+      result.storageKey,
+    )
+    if (latestURL) setResolvedResults((current) => ({ ...current, [rowId]: latestURL }))
+    return true
   }
 
   const runOne = async (rowId: string) => {
@@ -916,7 +936,7 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
               <section className="mb-6 grid gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:p-5">
                 <label className="block text-xs font-semibold text-zinc-700">
                   {t('Choose workflow')}
-                  <select
+                  <DropdownSelect
                     value={automation.workflowId}
                     onChange={(event) => changeWorkflow(event.target.value)}
                     disabled={busy}
@@ -934,7 +954,7 @@ export function AutomationDetailPage({ automationId }: { automationId: string })
                         {workflow.name}
                       </option>
                     ))}
-                  </select>
+                  </DropdownSelect>
                   {selectedWorkflow && !selectedPlan?.plan ? (
                     <span className="mt-2 block font-normal text-rose-600">
                       {t(selectedPlan?.reason || 'Workflow unavailable')}

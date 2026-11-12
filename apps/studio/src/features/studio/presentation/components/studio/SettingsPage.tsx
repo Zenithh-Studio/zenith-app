@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, HardDrive, KeyRound, LoaderCircle, Sparkles } from 'lucide-react'
 import { studioFetch } from '@/lib/studio-local-api'
@@ -306,14 +307,14 @@ export function SettingsPage() {
               <div className="mb-5 max-w-sm">
                 <label className="block text-xs font-medium text-zinc-600">
                   {t('settings.language')}
-                  <select
+                  <DropdownSelect
                     value={locale}
                     onChange={(event) => void changeLocale(event.target.value as 'en' | 'vi')}
                     className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm"
                   >
                     <option value="en">English</option>
                     <option value="vi">Tiếng Việt</option>
-                  </select>
+                  </DropdownSelect>
                 </label>
               </div>
               <form key={formRevision} onSubmit={(event) => void savePreference(event)}>

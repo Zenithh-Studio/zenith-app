@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { studioFetch } from '@/lib/studio-local-api'
 
 import Image from 'next/image'
@@ -537,7 +538,7 @@ export function ImageUtilitiesDialog({
                   </p>
                   <label className="block text-[11px] font-medium text-zinc-600">
                     {t('Camera angle')}
-                    <select
+                    <DropdownSelect
                       value={direction}
                       onChange={(event) => setDirection(event.target.value as typeof direction)}
                       className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-2 text-sm"
@@ -547,7 +548,7 @@ export function ImageUtilitiesDialog({
                           {t(angle)}
                         </option>
                       ))}
-                    </select>
+                    </DropdownSelect>
                   </label>
                   <label className="block text-[11px] font-medium text-zinc-600">
                     {t('Additional direction (optional)')}
@@ -568,7 +569,7 @@ export function ImageUtilitiesDialog({
                   <div className="grid grid-cols-2 gap-3">
                     <label className="text-[11px] font-medium text-zinc-600">
                       {t('Columns')}
-                      <select
+                      <DropdownSelect
                         value={columns}
                         onChange={(event) => setColumns(Number(event.target.value))}
                         className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-2 text-sm"
@@ -576,11 +577,11 @@ export function ImageUtilitiesDialog({
                         {[2, 3, 4].map((value) => (
                           <option key={value}>{value}</option>
                         ))}
-                      </select>
+                      </DropdownSelect>
                     </label>
                     <label className="text-[11px] font-medium text-zinc-600">
                       {t('Rows')}
-                      <select
+                      <DropdownSelect
                         value={rows}
                         onChange={(event) => setRows(Number(event.target.value))}
                         className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-2 text-sm"
@@ -588,7 +589,7 @@ export function ImageUtilitiesDialog({
                         {[2, 3, 4].map((value) => (
                           <option key={value}>{value}</option>
                         ))}
-                      </select>
+                      </DropdownSelect>
                     </label>
                   </div>
                   <p className="text-[10px] text-zinc-400">{t('Maximum 4 × 4 tiles per split.')}</p>
@@ -608,14 +609,14 @@ export function ImageUtilitiesDialog({
                   {action === 'upscale' && (
                     <label className="block text-[11px] font-medium text-zinc-600">
                       {t('Scale')}
-                      <select
+                      <DropdownSelect
                         value={scale}
                         onChange={(event) => setScale(Number(event.target.value) as 2 | 4)}
                         className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-2 text-sm"
                       >
                         <option value={2}>2×</option>
                         <option value={4}>4×</option>
-                      </select>
+                      </DropdownSelect>
                     </label>
                   )}
                   {action === 'super-resolution' && (

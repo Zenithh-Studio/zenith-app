@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { studioFetch } from '@/lib/studio-local-api'
 
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
@@ -599,7 +600,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block text-xs font-semibold text-zinc-600">
                     {t('Provider')}
-                    <select
+                    <DropdownSelect
                       value={provider}
                       onChange={(event) => {
                         const next = visibleProviders.find((item) => item.id === event.target.value)
@@ -613,11 +614,11 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                           {item.name}
                         </option>
                       ))}
-                    </select>
+                    </DropdownSelect>
                   </label>
                   <label className="block text-xs font-semibold text-zinc-600">
                     {t('Model')}
-                    <select
+                    <DropdownSelect
                       value={model}
                       onChange={(event) => setModel(event.target.value)}
                       className="mt-1.5 h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-800 outline-none focus:border-violet-400"
@@ -627,7 +628,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                           {displayModelName(item)}
                         </option>
                       ))}
-                    </select>
+                    </DropdownSelect>
                   </label>
                 </div>
 
@@ -664,7 +665,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <label className="text-xs font-semibold text-zinc-600">
                     {t('Aspect ratio')}
-                    <select
+                    <DropdownSelect
                       value={aspectRatio}
                       onChange={(event) => {
                         const nextRatio = event.target.value
@@ -681,12 +682,12 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                       {['1:1', '16:9', '9:16', '4:3', '3:2', '2:3', '3:4', '21:9'].map((item) => (
                         <option key={item}>{item}</option>
                       ))}
-                    </select>
+                    </DropdownSelect>
                   </label>
                   {modality === 'image' ? (
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Quality')}
-                      <select
+                      <DropdownSelect
                         value={quality}
                         onChange={(event) => setQuality(event.target.value)}
                         className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-normal text-zinc-700"
@@ -694,12 +695,12 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                         {['draft', 'standard', 'high'].map((item) => (
                           <option key={item}>{item}</option>
                         ))}
-                      </select>
+                      </DropdownSelect>
                     </label>
                   ) : (
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Duration')}
-                      <select
+                      <DropdownSelect
                         value={
                           customDuration || !durationOptions.includes(duration)
                             ? 'custom'
@@ -724,7 +725,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                           </option>
                         ))}
                         <option value="custom">{t('Custom')}</option>
-                      </select>
+                      </DropdownSelect>
                       {customDuration || !durationOptions.includes(duration) ? (
                         <input
                           type="number"
@@ -741,7 +742,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                   {modality === 'image' ? (
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Resolution')}
-                      <select
+                      <DropdownSelect
                         value={resolution}
                         onChange={(event) => {
                           const nextResolution = event.target.value
@@ -758,12 +759,12 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                             {item === 'auto' ? t('Auto') : item.toUpperCase()}
                           </option>
                         ))}
-                      </select>
+                      </DropdownSelect>
                     </label>
                   ) : modality === 'video' ? (
                     <label className="text-xs font-semibold text-zinc-600">
                       {t('Resolution')}
-                      <select
+                      <DropdownSelect
                         value={resolution}
                         disabled={!resolutionOptions.length}
                         onChange={(event) => setResolution(event.target.value)}
@@ -772,7 +773,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                         {(resolutionOptions.length ? resolutionOptions : ['720p']).map((item) => (
                           <option key={item}>{item}</option>
                         ))}
-                      </select>
+                      </DropdownSelect>
                     </label>
                   ) : null}
                 </div>

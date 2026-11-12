@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { studioFetch } from '@/lib/studio-local-api'
 
 import Link from 'next/link'
@@ -210,7 +211,7 @@ export function PromptLibraryPage() {
                 className="h-10 w-full rounded-xl border border-zinc-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-50"
               />
             </label>
-            <select
+            <DropdownSelect
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value)
@@ -223,7 +224,7 @@ export function PromptLibraryPage() {
               {categories.map((item) => (
                 <option key={item}>{item}</option>
               ))}
-            </select>
+            </DropdownSelect>
             {feedback && (
               <p role="status" className="text-xs text-zinc-500">
                 {feedback}

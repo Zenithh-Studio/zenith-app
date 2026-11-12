@@ -1,5 +1,6 @@
 'use client'
 
+import { DropdownSelect } from './DropdownSelect'
 import { providersFor } from '@znith/contracts'
 import type { ProviderInfo } from '@znith/contracts'
 import Image from 'next/image'
@@ -1841,7 +1842,7 @@ function ProviderModelPicker({
     <div className="grid grid-cols-2 gap-2">
       <label className="min-w-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
         {label}
-        <select
+        <DropdownSelect
           value={providerId}
           onChange={(event) => onProviderChange(event.target.value)}
           className="mt-1 h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs font-medium normal-case tracking-normal text-zinc-800 outline-none focus:border-violet-400"
@@ -1851,11 +1852,11 @@ function ProviderModelPicker({
               {item.name}
             </option>
           ))}
-        </select>
+        </DropdownSelect>
       </label>
       <label className="min-w-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
         Model
-        <select
+        <DropdownSelect
           value={model}
           onChange={(event) => onModelChange(event.target.value)}
           className="mt-1 h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-xs font-medium normal-case tracking-normal text-zinc-800 outline-none focus:border-violet-400"
@@ -1865,7 +1866,7 @@ function ProviderModelPicker({
               {item}
             </option>
           ))}
-        </select>
+        </DropdownSelect>
       </label>
     </div>
   )
