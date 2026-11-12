@@ -13,6 +13,8 @@ const requestSchema = z
     provider: z.string().trim().min(1),
     model: z.string().trim().min(1),
     prompt: z.string().trim().min(1),
+    systemPrompt: z.string().optional(),
+    userPrompt: z.string().optional(),
     aspectRatio: z.string().optional(),
     quality: z.enum(['draft', 'standard', 'high']).optional(),
     duration: z.number().positive().optional(),
@@ -52,6 +54,13 @@ const requestSchema = z
 
 type Input = z.infer<typeof requestSchema>
 
+function resolvedPrompt(input: Input) {
+  return (
+    [input.systemPrompt?.trim(), input.userPrompt?.trim()].filter(Boolean).join('\n\n') ||
+    input.prompt
+  )
+}
+
 function generationNode(input: Input): WorkflowNode {
   const type =
     input.modality === 'image'
@@ -65,7 +74,9 @@ function generationNode(input: Input): WorkflowNode {
     ...definition.defaultConfig,
     provider: input.provider,
     model: input.model,
-    prompt: input.prompt,
+    prompt: resolvedPrompt(input),
+    ...(input.systemPrompt !== undefined ? { systemPrompt: input.systemPrompt } : {}),
+    ...(input.userPrompt !== undefined ? { userPrompt: input.userPrompt } : {}),
     ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
     ...(input.quality ? { quality: input.quality } : {}),
     ...(input.duration ? { duration: input.duration } : {}),
@@ -194,6 +205,7 @@ async function run(request: Request) {
 
   const now = new Date().toISOString()
   const generationId = crypto.randomUUID()
+  const prompt = resolvedPrompt(input)
   const node = generationNode(input)
   const startedAt = Date.now()
   try {
@@ -238,7 +250,7 @@ async function run(request: Request) {
               filename: String(mediaData.fileName || outputFileName(value.type, mimeType, index)),
               mimeType: String(mediaData.mimeType || mimeType),
               filesize: Number(mediaData.bytes || 0),
-              alt: input.prompt,
+              alt: prompt,
               source: 'studio',
               createdAt: now,
             },
@@ -249,7 +261,7 @@ async function run(request: Request) {
       id: generationId,
       modality: input.modality,
       status: 'succeeded',
-      prompt: input.prompt,
+      prompt,
       provider: input.provider,
       model: input.model,
       inputSnapshot: { node, referenceAssetIds: input.referenceAssetIds || [] },
@@ -265,7 +277,7 @@ async function run(request: Request) {
       id: generationId,
       modality: input.modality,
       status: 'failed',
-      prompt: input.prompt,
+      prompt,
       provider: input.provider,
       model: input.model,
       inputSnapshot: { node, referenceAssetIds: input.referenceAssetIds || [] },

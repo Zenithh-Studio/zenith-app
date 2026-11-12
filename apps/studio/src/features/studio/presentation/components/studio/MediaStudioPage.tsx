@@ -80,9 +80,7 @@ type StudioPreferences = {
 }
 
 function assetUrl(asset: StudioAsset) {
-  return (
-    asset.url || (asset.filename ? `/api/media/file/${encodeURIComponent(asset.filename)}` : '')
-  )
+  return asset.url || ''
 }
 
 function generationOutputs(generation?: StudioGeneration): StudioAsset[] {
@@ -105,6 +103,10 @@ function generationOutputs(generation?: StudioGeneration): StudioAsset[] {
 
 function firstOutput(generation?: StudioGeneration): StudioAsset | undefined {
   return generationOutputs(generation)[0]
+}
+
+function combinedPrompt(systemPrompt: string, userPrompt: string) {
+  return [systemPrompt.trim(), userPrompt.trim()].filter(Boolean).join('\n\n')
 }
 
 function Modal({
@@ -189,7 +191,8 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
       ? initialPreferences.model
       : visibleProviders[0]?.models[modality]?.[0] || '',
   )
-  const [prompt, setPrompt] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [userPrompt, setUserPrompt] = useState('')
   const [aspectRatio, setAspectRatio] = useState(initialPreferences.aspectRatio)
   const [quality, setQuality] = useState(initialPreferences.quality)
   const [duration, setDuration] = useState(initialPreferences.duration)
@@ -242,6 +245,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
       : 0
   const selectedAsset = selectedAssets[selectedOutputIndex] || selectedAssets[0]
   const selectedUrl = selectedAsset ? assetUrl(selectedAsset) : ''
+  const effectivePrompt = combinedPrompt(systemPrompt, modality === 'image' ? userPrompt : '')
 
   useEffect(() => {
     let active = true
@@ -369,7 +373,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
         const body = (await response.json()) as { prompt?: { content?: string }; error?: string }
         if (!response.ok || !body.prompt?.content)
           throw new Error(t(body.error || 'Saved prompt could not be loaded.'))
-        if (active) setPrompt(body.prompt.content)
+        if (active) setSystemPrompt(body.prompt.content)
       })
       .catch((failure) => {
         if (active)
@@ -489,7 +493,8 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
     modality,
     provider,
     model,
-    prompt,
+    prompt: effectivePrompt,
+    ...(modality === 'image' ? { systemPrompt, userPrompt } : {}),
     aspectRatio,
     ...(modality === 'image'
       ? { quality, size, resolution, count: imageCount }
@@ -499,7 +504,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
 
   const generate = async (event?: FormEvent<HTMLFormElement>, retryOf?: string) => {
     event?.preventDefault()
-    if (generating || (!retryOf && !prompt.trim())) return
+    if (generating || (!retryOf && !effectivePrompt.trim())) return
     setGenerating(true)
     setError('')
     try {
@@ -626,16 +631,30 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                   </label>
                 </div>
 
+                {modality === 'image' && (
+                  <label className="block text-xs font-semibold text-zinc-600">
+                    {t('User Prompt')}
+                    <textarea
+                      value={userPrompt}
+                      onChange={(event) => setUserPrompt(event.target.value)}
+                      onPaste={handlePaste}
+                      rows={5}
+                      placeholder={t('Describe the specific request for this image…')}
+                      className="mt-1.5 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/60 p-4 text-sm font-normal leading-6 text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-50"
+                    />
+                  </label>
+                )}
+
                 <label className="block text-xs font-semibold text-zinc-600">
-                  {t('Prompt')}
+                  {t(modality === 'image' ? 'System Prompt' : 'Prompt')}
                   <textarea
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
+                    value={systemPrompt}
+                    onChange={(event) => setSystemPrompt(event.target.value)}
                     onPaste={handlePaste}
                     rows={7}
                     placeholder={
                       modality === 'image'
-                        ? t('Describe the image you want to create…')
+                        ? t('Add system instructions for image generation…')
                         : t('Describe the motion, subject, and atmosphere…')
                     }
                     className="mt-1.5 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/60 p-4 text-sm font-normal leading-6 text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-50"
@@ -934,7 +953,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                     type="submit"
                     disabled={
                       generating ||
-                      !prompt.trim() ||
+                      !effectivePrompt.trim() ||
                       !models.length ||
                       (modality === 'image' && (imageWidth < 1 || imageHeight < 1)) ||
                       (modality === 'video' && duration <= 0)
@@ -1160,7 +1179,16 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                         key={generation.id}
                         onClick={() => {
                           setSelected(generation)
-                          if (generation.prompt) setPrompt(generation.prompt)
+                          const config = generation.inputSnapshot?.node?.config
+                          if (typeof config?.systemPrompt === 'string') {
+                            setSystemPrompt(config.systemPrompt)
+                            setUserPrompt(
+                              typeof config.userPrompt === 'string' ? config.userPrompt : '',
+                            )
+                          } else if (generation.prompt) {
+                            setSystemPrompt(generation.prompt)
+                            setUserPrompt('')
+                          }
                         }}
                         className={`flex w-full items-start gap-3 rounded-xl border p-2.5 text-left transition ${selected?.id === generation.id ? 'border-violet-300 bg-violet-50/50' : 'border-zinc-100 hover:border-zinc-200 hover:bg-zinc-50'}`}
                       >
@@ -1290,7 +1318,7 @@ export function MediaStudioPage({ modality }: { modality: Modality }) {
                 type="button"
                 key={item.id}
                 onClick={() => {
-                  setPrompt(item.content)
+                  setSystemPrompt(item.content)
                   setPromptPickerOpen(false)
                 }}
                 className="w-full rounded-xl border border-zinc-200 p-3 text-left hover:border-violet-300 hover:bg-violet-50/40"
