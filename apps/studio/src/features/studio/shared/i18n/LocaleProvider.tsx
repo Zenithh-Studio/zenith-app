@@ -9,6 +9,7 @@ const messages: Record<Locale, Record<string, string>> = {
   en: {
     'nav.workflows': 'Workflows',
     'nav.production': 'Production',
+    'nav.automations': 'Automations',
     'nav.image': 'Image Studio',
     'nav.video': 'Video Studio',
     'nav.prompts': 'Prompt Library',
@@ -183,6 +184,7 @@ const messages: Record<Locale, Record<string, string>> = {
   },
   vi: {
     'nav.workflows': 'Quy trình',
+    'nav.automations': 'Tự động hóa',
     'nav.image': 'Studio ảnh',
     'nav.video': 'Studio video',
     'nav.prompts': 'Thư viện prompt',
@@ -251,6 +253,68 @@ const messages: Record<Locale, Record<string, string>> = {
 
 const additionalVietnamese: Record<string, string> = {
   'common.cancel': 'Hủy',
+  Automation: 'Tự động hóa',
+  Automations: 'Danh sách tự động hóa',
+  'Create automation': 'Tạo automation',
+  'Create your first automation': 'Tạo automation đầu tiên',
+  'Automation details': 'Chi tiết automation',
+  'Automation name': 'Tên automation',
+  'Choose workflow': 'Chọn quy trình',
+  'Select a workflow with one empty User Prompt node connected to one image or video generator.':
+    'Chọn quy trình có một node User Prompt đang để trống và kết nối với một node tạo ảnh hoặc video.',
+  'No automations yet': 'Chưa có automation nào',
+  'Manage repeatable runs of image and video workflows.':
+    'Quản lý các lượt chạy lặp lại của quy trình tạo ảnh và video.',
+  'Loading automations': 'Đang tải danh sách automation',
+  'No workflow matches the automation requirements.':
+    'Không có quy trình nào phù hợp với yêu cầu của automation.',
+  'Add prompt': 'Thêm prompt',
+  'Generate all': 'Tạo tất cả',
+  'Generate row': 'Tạo dòng này',
+  'Clear result': 'Xóa kết quả',
+  'Delete row': 'Xóa dòng',
+  'Attach media': 'Đính kèm media',
+  'Choose from Assets': 'Chọn từ Tài sản',
+  'Upload media from folder': 'Tải media từ thư mục',
+  'View media': 'Xem media',
+  'Choose media that matches the workflow output.': 'Chọn media phù hợp với đầu ra của quy trình.',
+  'Uploaded media type must match the workflow output.':
+    'Định dạng media phải khớp với đầu ra của quy trình.',
+  'No matching media assets.': 'Không có media phù hợp trong Tài sản.',
+  'Changes are saved only when you click Save.': 'Thay đổi chỉ được lưu khi bạn nhấn Lưu.',
+  'At most 20 prompts.': 'Tối đa 20 prompt.',
+  ID: 'ID',
+  Action: 'Thao tác',
+  'Generated result': 'Kết quả đã tạo',
+  'This workflow must contain exactly one empty User Prompt node.':
+    'Quy trình phải có chính xác một node User Prompt đang để trống.',
+  'The User Prompt node must be connected to the generator Prompt input.':
+    'Node User Prompt phải được kết nối với đầu vào Prompt của node tạo nội dung.',
+  'This workflow must contain exactly one image or video generator.':
+    'Quy trình phải có chính xác một node tạo ảnh hoặc video.',
+  'This workflow must contain exactly one output generator.':
+    'Quy trình phải có chính xác một node tạo đầu ra.',
+  'Automation supports image or video generators only.':
+    'Automation chỉ hỗ trợ node tạo ảnh hoặc video.',
+  'Prompt cannot be blank.': 'Prompt không được để trống.',
+  'Automation run finished: {generated} generated, {failed} failed, {skipped} skipped.':
+    'Đã chạy automation: {generated} thành công, {failed} thất bại, {skipped} bỏ qua.',
+  'Delete automation “{name}”?': 'Xóa automation “{name}”?',
+  'Automation not found.': 'Không tìm thấy automation.',
+  'Could not load automations.': 'Không thể tải danh sách automation.',
+  'Could not save automation.': 'Không thể lưu automation.',
+  'Could not create automation.': 'Không thể tạo automation.',
+  'Could not delete automation.': 'Không thể xóa automation.',
+  Completed: 'Đã hoàn tất',
+  Unsaved: 'Chưa lưu',
+  'Workflow unavailable': 'Quy trình không khả dụng',
+  'No user prompts yet. Add a prompt to begin.':
+    'Chưa có prompt người dùng. Hãy thêm prompt để bắt đầu.',
+  'Rows with an existing result are skipped when you generate all.':
+    'Khi chọn Tạo tất cả, các dòng đã có kết quả sẽ được bỏ qua.',
+  'Delete automation': 'Xóa automation',
+  'Describe the specific request for this image…': 'Mô tả yêu cầu cụ thể cho ảnh này…',
+  'Add system instructions for image generation…': 'Thêm chỉ dẫn hệ thống để tạo ảnh…',
   'nav.production': 'Sản xuất',
   'production.title': 'Quy trình sản xuất',
   'production.managerTitle': 'Productions',
@@ -481,6 +545,8 @@ const additionalVietnamese: Record<string, string> = {
   'Plain text': 'Văn bản thường',
   'Write a reusable prompt or creative brief…':
     'Viết prompt hoặc bản mô tả sáng tạo có thể dùng lại…',
+  'Write system instructions…': 'Viết chỉ dẫn hệ thống…',
+  'Write a user prompt or creative brief…': 'Viết prompt người dùng hoặc mô tả sáng tạo…',
   'Enter text to pass to connected nodes…': 'Nhập văn bản để chuyển tới các node đã nối…',
   '{count} text output': '{count} đầu ra văn bản',
   characters: 'ký tự',
@@ -587,6 +653,12 @@ const additionalVietnamese: Record<string, string> = {
   Utility: 'Tiện ích',
   'Text Input': 'Nhập văn bản',
   'Prompt Input': 'Nhập prompt',
+  'System Prompt': 'Prompt hệ thống',
+  'User Prompt': 'Prompt người dùng',
+  'System-level instructions that guide image generation.':
+    'Các chỉ dẫn hệ thống định hướng việc tạo ảnh.',
+  'The user request or creative brief for generation.':
+    'Yêu cầu hoặc mô tả sáng tạo của người dùng để tạo nội dung.',
   'JSON Input': 'Nhập JSON',
   'Image Input': 'Nhập ảnh',
   'Video Input': 'Nhập video',

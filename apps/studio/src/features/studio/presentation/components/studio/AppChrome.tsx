@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  Bot,
   Boxes,
   CircleHelp,
   Clapperboard,
@@ -19,7 +20,15 @@ import { useEffect, useState } from 'react'
 import { useLocale } from '@/features/studio/shared/i18n/LocaleProvider'
 
 type NavigationId =
-  'workflows' | 'production' | 'image' | 'video' | 'prompts' | 'assets' | 'settings' | 'docs'
+  | 'workflows'
+  | 'automations'
+  | 'production'
+  | 'image'
+  | 'video'
+  | 'prompts'
+  | 'assets'
+  | 'settings'
+  | 'docs'
 
 const mainNavigation: Array<{
   id: NavigationId
@@ -27,6 +36,7 @@ const mainNavigation: Array<{
   Icon: typeof Workflow
 }> = [
   { id: 'workflows', href: '/workflows', Icon: Workflow },
+  { id: 'automations', href: '/automations', Icon: Bot },
   { id: 'production', href: '/production', Icon: Clapperboard },
   { id: 'image', href: '/image', Icon: ImageIcon },
   { id: 'video', href: '/video', Icon: Video },

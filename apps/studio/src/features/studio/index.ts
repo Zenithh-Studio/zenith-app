@@ -6,6 +6,10 @@ export { ProductionPage } from './presentation/components/studio/ProductionPage'
 export { ProductionDashboard } from './presentation/components/studio/ProductionDashboard'
 export { WorkflowDashboard } from './presentation/components/studio/WorkflowDashboard'
 export { WorkflowEditor } from './presentation/components/studio/WorkflowEditor'
+export {
+  AutomationDashboard,
+  AutomationDetailPage,
+} from './presentation/components/studio/AutomationPage'
 export { DocumentationPage } from './routes/DocumentationPage'
 export { FrontendLayout, frontendMetadata } from './routes/FrontendLayout'
 export { AssetsPage, HomePage, WorkflowNotFoundPage } from './routes/pages'
