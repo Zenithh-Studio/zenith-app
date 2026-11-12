@@ -5,7 +5,8 @@ import { workflowTemplates } from './templates'
 describe('workflow node palette', () => {
   it('exposes the current studio workflow nodes and keeps legacy definitions registered', () => {
     expect(paletteNodeRegistry.map(({ type }) => type)).toEqual([
-      'input.prompt',
+      'input.system-prompt',
+      'input.user-prompt',
       'input.image',
       'processing.template',
       'ai.generate-text',

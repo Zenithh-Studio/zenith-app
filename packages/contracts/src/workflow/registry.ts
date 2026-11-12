@@ -37,11 +37,33 @@ export const nodeRegistry: NodeDefinition[] = [
   {
     type: 'input.prompt',
     version: 1,
-    displayName: 'Prompt Input',
+    displayName: 'User Prompt',
     category: 'Input',
-    description: 'A reusable prompt or creative brief.',
+    description: 'Legacy user prompt input retained for saved workflows.',
     inputs: [],
     outputs: [output('prompt', 'Prompt', 'text')],
+    defaultConfig: { value: '' },
+    available: true,
+  },
+  {
+    type: 'input.system-prompt',
+    version: 1,
+    displayName: 'System Prompt',
+    category: 'Input',
+    description: 'System-level instructions that guide image generation.',
+    inputs: [],
+    outputs: [output('systemPrompt', 'System prompt', 'text')],
+    defaultConfig: { value: '' },
+    available: true,
+  },
+  {
+    type: 'input.user-prompt',
+    version: 1,
+    displayName: 'User Prompt',
+    category: 'Input',
+    description: 'The user request or creative brief for generation.',
+    inputs: [],
+    outputs: [output('prompt', 'User prompt', 'text')],
     defaultConfig: { value: '' },
     available: true,
   },
@@ -175,6 +197,7 @@ export const nodeRegistry: NodeDefinition[] = [
     description: 'Generates an image using a configured image model.',
     inputs: [
       input('prompt', 'Prompt', 'text', false, false),
+      input('systemPrompt', 'System prompt', 'text', false, false),
       input('image', 'Reference images', 'image', true, false),
     ],
     outputs: [output('image', 'Image', 'image')],
@@ -403,7 +426,8 @@ export const nodeRegistry: NodeDefinition[] = [
 ]
 
 const workflowPaletteNodeTypes = new Set([
-  'input.prompt',
+  'input.system-prompt',
+  'input.user-prompt',
   'input.image',
   'processing.template',
   'ai.generate-text',

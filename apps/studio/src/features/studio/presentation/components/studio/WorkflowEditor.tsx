@@ -1,6 +1,6 @@
 'use client'
 
-import { studioFetch } from '@/lib/studio-local-api'
+import { resolveLocalMediaUrl, studioFetch } from '@/lib/studio-local-api'
 import { getRecord, updateRecord } from '@/lib/studio-indexed-db'
 import type { StudioRecord } from '@/lib/studio-indexed-db'
 
@@ -331,11 +331,45 @@ type TextNodeEditorContextValue = {
 
 const TextNodeEditorContext = createContext<TextNodeEditorContextValue | null>(null)
 
+const textInputNodeTypes = new Set([
+  'input.text',
+  'input.prompt',
+  'input.system-prompt',
+  'input.user-prompt',
+])
+const promptInputNodeTypes = new Set(['input.prompt', 'input.system-prompt', 'input.user-prompt'])
+
+function isTextInputNodeType(type: string) {
+  return textInputNodeTypes.has(type)
+}
+
+function isPromptInputNodeType(type: string) {
+  return promptInputNodeTypes.has(type)
+}
+
+function preferredPromptTargetPortId(sourceType: string, targetType: string) {
+  const targetInputs = registryByType.get(targetType)?.inputs ?? []
+  if (
+    sourceType === 'input.system-prompt' &&
+    targetInputs.some((port) => port.id === 'systemPrompt')
+  )
+    return 'systemPrompt'
+  if (
+    registryByType.get(sourceType)?.outputs.some((port) => port.dataType === 'text') &&
+    targetInputs.some((port) => port.id === 'prompt')
+  ) {
+    return 'prompt'
+  }
+  return undefined
+}
+
 const canvasImageAspectRatios = ['9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9']
 
 const iconByType: Record<string, typeof FileText> = {
   'input.text': FileText,
   'input.prompt': MessageSquareText,
+  'input.system-prompt': MessageSquareText,
+  'input.user-prompt': MessageSquareText,
   'input.json': Braces,
   'processing.template': Code2,
   'processing.merge-text': Copy,
@@ -436,24 +470,26 @@ function TypedHandles({ definition }: { definition: ReturnType<typeof registryBy
   )
 }
 
-function mediaSource(value: unknown, assetId?: unknown, fileName?: unknown) {
+function mediaSource(value: unknown, _assetId?: unknown, _fileName?: unknown) {
   const source = typeof value === 'string' ? value : ''
-  if (!assetId) return source
+  // Local-first assets are hydrated from IndexedDB as object URLs. Keep those
+  // URLs intact so the browser can read the saved blob directly.
+  if (source.startsWith('blob:') || source.startsWith('data:')) return source
 
   if (source) {
     try {
       const parsed = new URL(source, 'http://payload.local')
-      if (parsed.pathname.startsWith('/api/media/file/')) {
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`
-      }
+      // This legacy route is not available in the local-first Studio app.
+      // Workflow media is resolved from IndexedDB by asset ID instead.
+      if (parsed.pathname.startsWith('/api/media/file/')) return ''
+      if (parsed.origin !== 'http://payload.local') return source
+      if (source.startsWith('/')) return source
     } catch {
-      // Fall back to the upload filename when the asset URL is malformed.
+      return source
     }
   }
 
-  return typeof fileName === 'string' && fileName
-    ? `/api/media/file/${encodeURIComponent(fileName)}`
-    : source
+  return source
 }
 
 function imageRatioLabel(width: number, height: number) {
@@ -832,6 +868,7 @@ function NodeActionToolbar({
   const outputText = typeof textOutput?.value === 'string' ? textOutput.value : ''
   const isAI = nodeCapabilities?.generator === true
   const isVideoGenerator = isAI && nodeCapabilities?.modality === 'video'
+  const isImageGenerator = type === 'ai.generate-image' || type === 'ai.edit-image'
   const referenceInputPorts = [
     'ai.generate-image',
     'ai.edit-image',
@@ -867,9 +904,7 @@ function NodeActionToolbar({
     isVideoTaskPending,
     isWorkflowRunning: actions.isWorkflowRunning,
     hasOutput: Boolean(output || outputText),
-    hasText: Boolean(
-      (type === 'input.text' || type === 'input.prompt') && String(config.value || '').trim(),
-    ),
+    hasText: Boolean(isTextInputNodeType(type) && String(config.value || '').trim()),
     hasPrompt: Boolean(currentMediaVersion?.prompt),
     hasImageOutput: output?.type === 'image',
     hasSavedImage: Boolean(imageAssetId),
@@ -1139,13 +1174,18 @@ function NodeActionToolbar({
               <select
                 aria-label={t('Aspect ratio')}
                 value={aspectRatioValue || String(config.aspectRatio || '1:1')}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const aspectRatio = event.target.value
+                  const dimensions = isImageGenerator
+                    ? imageSizeFromSettings(String(config.resolution || '1k'), aspectRatio)
+                    : undefined
                   update({
-                    aspectRatio: event.target.value,
+                    aspectRatio,
+                    ...(dimensions ? { size: `${dimensions.width}x${dimensions.height}` } : {}),
                     selectedOutput: null,
                     outputRevision: nextOutputRevision(),
                   })
-                }
+                }}
                 className="h-7 cursor-pointer rounded-lg bg-transparent px-1.5 text-[10px] font-medium text-zinc-700 outline-none hover:bg-zinc-100"
               >
                 {ratioOptions.map((ratio) => (
@@ -1473,7 +1513,7 @@ function NodeActionToolbar({
               ) : null}
             </>
           ) : null}
-          {copyPromptAction && ['input.text', 'input.prompt'].includes(type) ? (
+          {copyPromptAction && isTextInputNodeType(type) ? (
             <button
               type="button"
               title={t(copyPromptAction.disabledReason || 'Copy this text prompt.')}
@@ -1546,7 +1586,7 @@ function NodeActionToolbar({
               {showActionLabels && <span className="text-[9px]">Image</span>}
             </button>
           ) : null}
-          {['input.text', 'input.prompt'].includes(type) ? (
+          {isTextInputNodeType(type) ? (
             <>
               <button
                 type="button"
@@ -2346,6 +2386,10 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
   const isRenaming = actions?.renamingNodeId === data.workflowNode.id
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null)
   const [hovered, setHovered] = useState(false)
+  const textNodeId = data.workflowNode.id
+  const textNodeValue = String(data.workflowNode.config.value ?? '')
+  const [textDraft, setTextDraft] = useState({ nodeId: textNodeId, value: textNodeValue })
+  const isEditingTextRef = useRef(false)
   const toolbarHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showHoverToolbar = () => {
     if (toolbarHoverTimer.current) clearTimeout(toolbarHoverTimer.current)
@@ -2402,17 +2446,68 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
     output?.assetId ??
     output?.metadata?.assetId ??
     previewObject?.assetId ??
+    previewObject?.id ??
     data.workflowNode.config.assetId
   const mediaFileName =
     output?.metadata?.filename ??
     output?.metadata?.fileName ??
     previewObject?.filename ??
+    previewObject?.fileName ??
     data.workflowNode.config.fileName
+  const mediaStorageKey =
+    output?.metadata?.storageKey ??
+    previewObject?.storageKey ??
+    previewObject?.fileId ??
+    data.workflowNode.config.storageKey
   const mediaValue = mediaSource(
     previewObject?.url ?? (typeof preview === 'string' ? preview : data.workflowNode.config.url),
     mediaAssetId,
     mediaFileName,
   )
+  const mediaAssetIdKey = typeof mediaAssetId === 'string' ? mediaAssetId : ''
+  const mediaFileNameKey = typeof mediaFileName === 'string' ? mediaFileName : ''
+  const mediaStorageKeyValue = typeof mediaStorageKey === 'string' ? mediaStorageKey : ''
+  const mediaReferenceKey = JSON.stringify([
+    mediaAssetIdKey,
+    mediaFileNameKey,
+    mediaStorageKeyValue,
+  ])
+  const [resolvedLocalMedia, setResolvedLocalMedia] = useState<{
+    reference: string
+    url: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!mediaAssetIdKey && !mediaFileNameKey && !mediaStorageKeyValue) {
+      setResolvedLocalMedia(null)
+      return
+    }
+
+    let active = true
+    void resolveLocalMediaUrl(mediaAssetIdKey, mediaFileNameKey, mediaStorageKeyValue)
+      .then((url) => {
+        if (active) {
+          setResolvedLocalMedia(url ? { reference: mediaReferenceKey, url } : null)
+        }
+      })
+      .catch(() => {
+        if (active) setResolvedLocalMedia(null)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [mediaAssetIdKey, mediaFileNameKey, mediaReferenceKey, mediaStorageKeyValue])
+
+  const hasStoredMediaReference = Boolean(
+    mediaAssetIdKey || mediaFileNameKey || mediaStorageKeyValue,
+  )
+  const displayedMediaValue =
+    resolvedLocalMedia?.reference === mediaReferenceKey
+      ? resolvedLocalMedia.url
+      : hasStoredMediaReference && mediaValue.startsWith('blob:')
+        ? ''
+        : mediaValue
   const slug = nodeSlug(data.workflowNode)
   const ratio = String(
     data.workflowNode.config.aspectRatio || (mediaType === 'video' ? '16:9' : '1:1'),
@@ -2437,19 +2532,19 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
   const imageDimensions =
     mediaType === 'image' && configuredImageWidth > 0 && configuredImageHeight > 0
       ? { width: configuredImageWidth, height: configuredImageHeight }
-      : measuredImage?.source === mediaValue
+      : measuredImage?.source === displayedMediaValue
         ? measuredImage
         : null
   const mediaRatio =
     mediaType === 'image' && imageDimensions
       ? `${imageDimensions.width} / ${imageDimensions.height}`
-      : mediaType === 'video' && measuredVideo?.source === mediaValue
+      : mediaType === 'video' && measuredVideo?.source === displayedMediaValue
         ? `${measuredVideo.width} / ${measuredVideo.height}`
         : `${ratioWidth || 1} / ${ratioHeight || 1}`
   const mediaRatioLabel =
     mediaType === 'image' && imageDimensions
       ? imageRatioLabel(imageDimensions.width, imageDimensions.height)
-      : mediaType === 'video' && measuredVideo?.source === mediaValue
+      : mediaType === 'video' && measuredVideo?.source === displayedMediaValue
         ? imageRatioLabel(measuredVideo.width, measuredVideo.height)
         : ratio
   const imageRatioLocked = data.workflowNode.config.lockImageAspectRatio !== false
@@ -2540,7 +2635,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                   (currentAssetId && currentAssetId === versionAssetId) ||
                   (mediaOutputURL(output) &&
                     mediaOutputURL(output) === mediaOutputURL(version.output)) ||
-                  (mediaValue && versionURL === mediaValue),
+                  (displayedMediaValue && versionURL === displayedMediaValue),
                 )
                 return (
                   <button
@@ -2611,10 +2706,10 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                   : { aspectRatio: mediaRatio }
             }
           >
-            {mediaValue ? (
+            {displayedMediaValue ? (
               mediaType === 'audio' ? (
                 <audio
-                  src={mediaValue}
+                  src={displayedMediaValue}
                   controls
                   className="w-full px-3"
                   aria-label={t('{name} audio output', { name: data.workflowNode.name })}
@@ -2622,14 +2717,14 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
               ) : mediaType === 'video' ? (
                 <video
                   ref={videoPreviewRef}
-                  src={mediaValue}
+                  src={displayedMediaValue}
                   controls
                   className="size-full object-contain"
                   onLoadedMetadata={(event) => {
                     const { videoWidth, videoHeight } = event.currentTarget
                     if (videoWidth > 0 && videoHeight > 0) {
                       setMeasuredVideo({
-                        source: mediaValue,
+                        source: displayedMediaValue,
                         width: videoWidth,
                         height: videoHeight,
                       })
@@ -2638,7 +2733,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                 />
               ) : mediaAssetId ? (
                 <Image
-                  src={mediaValue}
+                  src={displayedMediaValue}
                   alt={data.workflowNode.name}
                   fill
                   sizes="320px"
@@ -2648,7 +2743,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                     const { naturalWidth, naturalHeight } = event.currentTarget
                     if (naturalWidth > 0 && naturalHeight > 0) {
                       setMeasuredImage({
-                        source: mediaValue,
+                        source: displayedMediaValue,
                         width: naturalWidth,
                         height: naturalHeight,
                       })
@@ -2657,7 +2752,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                 />
               ) : (
                 <Image
-                  src={mediaValue}
+                  src={displayedMediaValue}
                   alt={data.workflowNode.name}
                   fill
                   sizes="320px"
@@ -2667,7 +2762,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                     const { naturalWidth, naturalHeight } = event.currentTarget
                     if (naturalWidth > 0 && naturalHeight > 0) {
                       setMeasuredImage({
-                        source: mediaValue,
+                        source: displayedMediaValue,
                         width: naturalWidth,
                         height: naturalHeight,
                       })
@@ -2684,7 +2779,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
             ) : (
               <ImageIcon size={38} className="text-zinc-300" />
             )}
-            {mediaValue ? (
+            {displayedMediaValue ? (
               <button
                 type="button"
                 aria-label={t('Enlarge media preview')}
@@ -2721,7 +2816,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
           videoRef={videoPreviewRef}
           onOpenPreview={() => setPreviewOpen(true)}
         />
-        {previewOpen && mediaValue && typeof document !== 'undefined'
+        {previewOpen && displayedMediaValue && typeof document !== 'undefined'
           ? createPortal(
               <div
                 className="nodrag nopan fixed inset-0 z-[10000] grid place-items-center bg-black/80 p-4 backdrop-blur-sm"
@@ -2749,14 +2844,14 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                   </button>
                   {mediaType === 'audio' ? (
                     <audio
-                      src={mediaValue}
+                      src={displayedMediaValue}
                       controls
                       autoPlay={false}
                       className="w-full max-w-3xl"
                     />
                   ) : mediaType === 'video' ? (
                     <video
-                      src={mediaValue}
+                      src={displayedMediaValue}
                       controls
                       autoPlay={false}
                       playsInline
@@ -2765,7 +2860,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
                   ) : (
                     <div className="relative h-full w-full">
                       <Image
-                        src={mediaValue}
+                        src={displayedMediaValue}
                         alt={data.workflowNode.name}
                         fill
                         sizes="100vw"
@@ -2783,9 +2878,20 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
     )
   }
 
-  if (data.workflowNode.type === 'input.text' || data.workflowNode.type === 'input.prompt') {
-    const value = String(data.workflowNode.config.value ?? '')
-    const isPrompt = data.workflowNode.type === 'input.prompt'
+  if (isTextInputNodeType(data.workflowNode.type)) {
+    const value =
+      textDraft.nodeId === textNodeId && isEditingTextRef.current ? textDraft.value : textNodeValue
+    const isPrompt = isPromptInputNodeType(data.workflowNode.type)
+    const isSystemPrompt = data.workflowNode.type === 'input.system-prompt'
+    const nodeName =
+      data.workflowNode.type === 'input.prompt' && data.workflowNode.name === 'Prompt Input'
+        ? t('User Prompt')
+        : data.workflowNode.name
+    const textPlaceholder = isSystemPrompt
+      ? 'Write system instructions…'
+      : isPrompt
+        ? 'Write a user prompt or creative brief…'
+        : 'Enter text to pass to connected nodes…'
 
     return (
       <div
@@ -2799,7 +2905,7 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
             <Icon size={12} />
           </span>
           <InlineNodeName
-            name={data.workflowNode.name}
+            name={nodeName}
             renaming={isRenaming}
             onCommit={(name) => actions?.saveNodeName(data.workflowNode.id, name)}
             onCancel={() => actions?.cancelRenameNode()}
@@ -2811,29 +2917,36 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
           className={`rounded-2xl border bg-white shadow-[0_10px_30px_rgba(24,24,27,0.08)] transition ${isRunning ? 'border-violet-400 ring-2 ring-violet-100' : selected ? 'border-violet-500 ring-2 ring-violet-100' : tone.border}`}
         >
           <div className="p-3.5 pb-2.5">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                {t(isPrompt ? 'Prompt content' : 'Text content')}
-              </span>
-              <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-medium text-zinc-500">
-                {t(isPrompt ? 'Reusable prompt' : 'Plain text')}
-              </span>
-            </div>
+            {!isPrompt ? (
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                  {t('Text content')}
+                </span>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[9px] font-medium text-zinc-500">
+                  {t('Plain text')}
+                </span>
+              </div>
+            ) : null}
             <textarea
-              aria-label={`${data.workflowNode.name} content`}
-              className="nodrag nowheel min-h-[184px] max-h-[360px] w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs leading-[1.65] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-50"
-              placeholder={t(
-                isPrompt
-                  ? 'Write a reusable prompt or creative brief…'
-                  : 'Enter text to pass to connected nodes…',
-              )}
-              rows={8}
+              aria-label={`${nodeName} content`}
+              className={`nodrag nowheel w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 text-xs leading-[1.65] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-50 ${isPrompt ? 'min-h-[240px] max-h-[440px]' : 'min-h-[184px] max-h-[360px]'}`}
+              placeholder={t(textPlaceholder)}
+              rows={isPrompt ? 10 : 8}
               value={value}
               style={{ fontSize: `${Number(data.workflowNode.config.fontSize || 12)}px` }}
-              onChange={(event) =>
-                textNodeEditor?.updateValue(data.workflowNode.id, event.target.value)
-              }
-              onBlur={() => textNodeEditor?.finishEditing(data.workflowNode.id)}
+              onFocus={() => {
+                isEditingTextRef.current = true
+                setTextDraft({ nodeId: textNodeId, value: textNodeValue })
+              }}
+              onChange={(event) => {
+                const nextValue = event.target.value
+                setTextDraft({ nodeId: textNodeId, value: nextValue })
+                textNodeEditor?.updateValue(textNodeId, nextValue)
+              }}
+              onBlur={() => {
+                isEditingTextRef.current = false
+                textNodeEditor?.finishEditing(textNodeId)
+              }}
             />
           </div>
           <div className="flex items-center justify-between border-t border-zinc-100 px-3.5 py-2.5 text-[10px] text-zinc-400">
@@ -2894,24 +3007,22 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
           </div>
         ) : record?.error ? (
           <div className="line-clamp-3 text-xs leading-relaxed text-rose-600">{record.error}</div>
-        ) : mediaType && mediaValue ? (
+        ) : mediaType && displayedMediaValue ? (
           mediaType === 'audio' ? (
-            <audio src={mediaValue} controls className="w-full rounded-xl" />
+            <audio src={displayedMediaValue} controls className="w-full rounded-xl" />
           ) : mediaType === 'video' ? (
             <video
-              src={mediaValue}
+              src={displayedMediaValue}
               controls
               className="h-52 w-full rounded-xl bg-zinc-950 object-contain"
             />
           ) : (
             <div className="relative h-52 w-full overflow-hidden rounded-xl bg-zinc-100">
-              <Image
-                src={mediaValue}
+              <img
+                src={displayedMediaValue}
                 alt={data.workflowNode.name}
-                fill
-                sizes="320px"
-                unoptimized
-                className="object-contain"
+                draggable={false}
+                className="size-full object-contain"
               />
             </div>
           )
@@ -3192,6 +3303,35 @@ function targetPortForEdge(edge: Edge) {
   return String(
     (edge.data as { targetPort?: string } | undefined)?.targetPort || edge.targetHandle || '',
   )
+}
+
+function availableTargetPort(
+  targetNodeType: string,
+  sourceNodeType: string,
+  dataType: string,
+  targetNodeId: string,
+  edges: Edge[],
+  excludedEdgeId?: string,
+) {
+  const compatiblePorts = registryByType
+    .get(targetNodeType)
+    ?.inputs.filter((port) => port.dataType === dataType)
+  const preferredPortId = preferredPromptTargetPortId(sourceNodeType, targetNodeType)
+  const isAvailable = (port: NonNullable<typeof compatiblePorts>[number]) =>
+    Boolean(
+      port &&
+      (port.multiple ||
+        !edges.some(
+          (edge) =>
+            edge.id !== excludedEdgeId &&
+            edge.target === targetNodeId &&
+            targetPortForEdge(edge) === port.id,
+        )),
+    )
+  if (preferredPortId) {
+    return compatiblePorts?.find((port) => port.id === preferredPortId && isAvailable(port))
+  }
+  return compatiblePorts?.find(isAvailable)
 }
 
 export function WorkflowEditor({ workflowId }: { workflowId: string }) {
@@ -3739,10 +3879,34 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       .toLowerCase()
       .includes(pickerSearch.toLowerCase())
     if (!matchesSearch || !pendingNodeConnection) return matchesSearch
-    const definition = registryByType.get(item.type)
-    const ports =
-      pendingNodeConnection.handleType === 'source' ? definition?.inputs : definition?.outputs
-    return ports?.some((port) => port.dataType === pendingNodeConnection.dataType) ?? false
+    if (pendingNodeConnection.handleType === 'source') {
+      const sourceNode = nodes.find(
+        (node) => node.id === pendingNodeConnection.nodeId && !node.data.canvasGroup,
+      )
+      return Boolean(
+        sourceNode &&
+        availableTargetPort(
+          item.type,
+          sourceNode.data.workflowNode.type,
+          pendingNodeConnection.dataType,
+          '__new-node__',
+          edges,
+        ),
+      )
+    }
+    const targetNode = nodes.find(
+      (node) => node.id === pendingNodeConnection.nodeId && !node.data.canvasGroup,
+    )
+    return Boolean(
+      targetNode &&
+      availableTargetPort(
+        targetNode.data.workflowNode.type,
+        item.type,
+        pendingNodeConnection.dataType,
+        targetNode.id,
+        edges,
+      ),
+    )
   })
   const latestExecution = executions[0]
   const latestExecutionNodeNames = new Map(
@@ -3760,7 +3924,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     ? runningNodeNames.join(', ')
     : 'Preparing workflow'
   const isTextInputNode = Boolean(
-    selectedNode && ['input.text', 'input.prompt'].includes(selectedNode.data.workflowNode.type),
+    selectedNode && isTextInputNodeType(selectedNode.data.workflowNode.type),
   )
   const isMediaConfiguration = Boolean(
     selectedNode &&
@@ -3902,6 +4066,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     alt?: string
     mimeType?: string
     url?: string | null
+    storageKey?: string
     filesize?: number
   }) => {
     const targetNode = nodes.find((node) => node.id === selectedId && !node.data.canvasGroup)
@@ -3909,14 +4074,14 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       ? registryByType.get(targetNode.data.workflowNode.type)
       : undefined
     if (asset.kind === 'text') {
-      if (
-        targetNode &&
-        ['input.text', 'input.prompt'].includes(targetNode.data.workflowNode.type)
-      ) {
+      if (targetNode && isTextInputNodeType(targetNode.data.workflowNode.type)) {
         updateNodeConfig(targetNode.id, { value: asset.content || '', textAssetId: asset.id })
         setNotice('Text asset inserted into the selected input.')
       } else {
-        addNode('input.prompt', undefined, { value: asset.content || '', textAssetId: asset.id })
+        addNode('input.user-prompt', undefined, {
+          value: asset.content || '',
+          textAssetId: asset.id,
+        })
       }
       return
     }
@@ -3934,6 +4099,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     }
     const config = {
       assetId: asset.id,
+      ...(asset.storageKey ? { storageKey: asset.storageKey } : {}),
       url: mediaSource(asset.url || '', asset.id, asset.filename),
       fileName: asset.filename || asset.title || '',
       mimeType,
@@ -4005,12 +4171,12 @@ function EditorInner({ workflowId }: { workflowId: string }) {
 
   const insertPrompt = (prompt: { id: string; title: string; content: string }) => {
     const targetNode = nodes.find((node) => node.id === selectedId && !node.data.canvasGroup)
-    if (targetNode && ['input.text', 'input.prompt'].includes(targetNode.data.workflowNode.type)) {
+    if (targetNode && isTextInputNodeType(targetNode.data.workflowNode.type)) {
       updateNodeConfig(targetNode.id, { value: prompt.content, promptId: prompt.id })
       setNotice('Prompt inserted into the selected text node.')
       return
     }
-    addNode('input.prompt', undefined, {
+    addNode('input.user-prompt', undefined, {
       value: prompt.content,
       promptId: prompt.id,
       title: prompt.title,
@@ -4025,17 +4191,35 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const definition = registryByType.get(type)
     if (!definition?.available) return null
     const connection = pendingNodeConnection
+    const id = `${type.replaceAll('.', '-')}-${crypto.randomUUID().slice(0, 8)}`
+    const connectedNode = connection
+      ? nodes.find((node) => node.id === connection.nodeId && !node.data.canvasGroup)
+      : undefined
+    const sourceNodeType =
+      connection?.handleType === 'source' ? connectedNode?.data.workflowNode.type || '' : type
+    const targetNodeType =
+      connection?.handleType === 'source' ? type : connectedNode?.data.workflowNode.type || ''
     const connectionPort = connection
       ? connection.handleType === 'source'
-        ? definition.inputs.find((port) => port.dataType === connection.dataType)
+        ? availableTargetPort(type, sourceNodeType, connection.dataType, id, edges)
         : definition.outputs.find((port) => port.dataType === connection.dataType)
       : undefined
-    if (connection && !connectionPort) {
+    const connectionTargetPort = connection
+      ? connection.handleType === 'source'
+        ? connectionPort
+        : availableTargetPort(
+            targetNodeType,
+            sourceNodeType,
+            connection.dataType,
+            connection.nodeId,
+            edges,
+          )
+      : undefined
+    if (connection && (!connectionPort || !connectionTargetPort)) {
       setError('Choose a node with a matching typed port to complete this connection.')
       return null
     }
     captureHistory()
-    const id = `${type.replaceAll('.', '-')}-${crypto.randomUUID().slice(0, 8)}`
     const workflowNode: WorkflowNode = {
       id,
       type,
@@ -4053,8 +4237,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       const targetNodeId = connection.handleType === 'source' ? id : connection.nodeId
       const sourceHandle =
         connection.handleType === 'source' ? connection.handleId : connectionPort.id
-      const targetPortId =
-        connection.handleType === 'source' ? connectionPort.id : connection.targetPortId
+      const targetPortId = connectionTargetPort!.id
       setEdges((current) =>
         addEdge(
           {
@@ -4085,7 +4268,13 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const targetDefinition = registryByType.get(target?.data.workflowNode.type || '')
     const targetPort = targetDefinition?.inputs.find((port) => port.id === targetPortId)
     const inputType =
-      targetPort?.dataType === 'image' ? 'input.image' : `input.${targetPort?.dataType}`
+      target?.data.workflowNode.type === 'ai.generate-image' && targetPortId === 'systemPrompt'
+        ? 'input.system-prompt'
+        : target?.data.workflowNode.type === 'ai.generate-image' && targetPortId === 'prompt'
+          ? 'input.user-prompt'
+          : targetPort?.dataType === 'image'
+            ? 'input.image'
+            : `input.${targetPort?.dataType}`
     const inputDefinition = registryByType.get(inputType)
     const sourcePort = inputDefinition?.outputs.find(
       (port) => port.dataType === targetPort?.dataType,
@@ -4142,8 +4331,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const sourceDefinition = sourceType ? registryByType.get(sourceType) : undefined
     const imageDefinition = registryByType.get('ai.generate-image')
     const sourcePort = sourceDefinition?.outputs.find((port) => port.dataType === 'text')
+    const targetPortId =
+      (sourceType && preferredPromptTargetPortId(sourceType, 'ai.generate-image')) || 'prompt'
     const promptPort = imageDefinition?.inputs.find(
-      (port) => port.id === 'prompt' && port.dataType === 'text',
+      (port) => port.id === targetPortId && port.dataType === 'text',
     )
     if (!sourceNode || !sourceText || !sourcePort || !promptPort || !imageDefinition?.available) {
       setError('Add text to this node before generating an image.')
@@ -4156,7 +4347,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       name: imageDefinition.displayName,
       slug: `generate-image-${imageNodeId.slice(-4)}`,
       position: { x: sourceNode.position.x + 440, y: sourceNode.position.y },
-      config: { ...cloneValue(imageDefinition.defaultConfig), prompt: sourceText },
+      config: cloneValue(imageDefinition.defaultConfig),
     }
     const workflowEdge: WorkflowEdge = {
       id: `edge-${crypto.randomUUID().slice(0, 8)}`,
@@ -4238,7 +4429,8 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         config: {
           ...cloneValue(imageDefinition.defaultConfig),
           assetId: asset.id,
-          url: asset.url || `/api/media/file/${encodeURIComponent(filename)}`,
+          ...(asset.storageKey ? { storageKey: asset.storageKey } : {}),
+          url: mediaSource(asset.url || '', asset.id, filename),
           fileName: filename,
           mimeType: asset.mimeType || 'image/png',
           ...(asset.derivedMetadata ? { derivedMetadata: asset.derivedMetadata } : {}),
@@ -4490,6 +4682,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         const media = responseBody.media
         const config = {
           assetId: media.id,
+          ...(typeof media.storageKey === 'string' ? { storageKey: media.storageKey } : {}),
           workflowUpload: true,
           url: mediaSource(media.url, media.id, media.filename),
           fileName: media.filename || file.name,
@@ -4591,13 +4784,15 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const compatiblePorts = registryByType
       .get(targetNode.data.workflowNode.type)
       ?.inputs.filter((port) => port.dataType === sourcePort?.dataType)
-    const targetPort = compatiblePorts?.find(
-      (port) =>
-        port.multiple ||
-        !edges.some(
-          (edge) => edge.target === connection.target && targetPortForEdge(edge) === port.id,
-        ),
-    )
+    const targetPort = sourcePort
+      ? availableTargetPort(
+          targetNode.data.workflowNode.type,
+          sourceNode.data.workflowNode.type,
+          sourcePort.dataType,
+          connection.target,
+          edges,
+        )
+      : undefined
     if (!sourcePort || !compatiblePorts?.length) {
       setError('Those ports are not type-compatible.')
       return
@@ -4648,16 +4843,17 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const compatiblePorts = registryByType
       .get(targetNode?.data.workflowNode.type || '')
       ?.inputs.filter((port) => port.dataType === sourcePort?.dataType)
-    const targetPort = compatiblePorts?.find(
-      (port) =>
-        port.multiple ||
-        !edges.some(
-          (edge) =>
-            edge.id !== oldEdge.id &&
-            edge.target === connection.target &&
-            targetPortForEdge(edge) === port.id,
-        ),
-    )
+    const targetPort =
+      sourcePort && targetNode
+        ? availableTargetPort(
+            targetNode.data.workflowNode.type,
+            sourceNode?.data.workflowNode.type || '',
+            sourcePort.dataType,
+            connection.target,
+            edges,
+            oldEdge.id,
+          )
+        : undefined
     if (!sourcePort || !targetPort) {
       setError('No compatible input is available for this connection.')
       return
@@ -5550,7 +5746,7 @@ function EditorInner({ workflowId }: { workflowId: string }) {
               selectMediaVersion,
               addDerivedImages,
               addTextNode: (content, sourceAssetId) =>
-                addNode('input.prompt', undefined, {
+                addNode('input.user-prompt', undefined, {
                   value: content,
                   ...(sourceAssetId
                     ? {

@@ -125,6 +125,7 @@ export interface ExecutionDocument {
 export interface AssetDocument {
   id: string
   url?: string | null
+  storageKey?: string
   filename?: string | null
   mimeType?: string | null
   filesize?: number | null

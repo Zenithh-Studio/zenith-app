@@ -43,6 +43,16 @@ function resolveInputs(
 const text = (value: unknown) => String(value ?? '')
 const mediaURL = (value: unknown) =>
   value && typeof value === 'object' ? text((value as Record<string, unknown>).url) : text(value)
+
+function mediaBlobFromDataURL(value: string) {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value)
+  if (!match) throw new Error('Workflow reference image data is invalid.')
+  const bytes = match[2]
+    ? Buffer.from(match[3] || '', 'base64')
+    : Buffer.from(decodeURIComponent(match[3] || ''))
+  return new Blob([Uint8Array.from(bytes)], { type: match[1] || 'application/octet-stream' })
+}
+
 const absoluteMediaURL = (value: unknown) => {
   const url = mediaURL(value)
   if (!url) return ''
@@ -114,21 +124,22 @@ type ImageAPIResponse = {
   error?: { message?: string }
 }
 
-function chatGPT2APIImageSize(aspectRatio: unknown, size?: unknown, resolution?: unknown) {
+function imageSizeForSettings(aspectRatio: unknown, size?: unknown, resolution?: unknown) {
+  const selectedRatio = text(aspectRatio || '1:1')
   const customSize = text(size).trim()
-  if (/^\d+x\d+$/i.test(customSize)) return customSize
-  const dimensions = imageSizeFromSettings(text(resolution || '1k'), text(aspectRatio || '1:1'))
+  // Older toolbar updates saved the selected ratio without updating the default square size.
+  const hasLegacySquareDefault = selectedRatio !== '1:1' && customSize.toLowerCase() === '1024x1024'
+  if (/^\d+x\d+$/i.test(customSize) && !hasLegacySquareDefault) return customSize
+  const dimensions = imageSizeFromSettings(text(resolution || '1k'), selectedRatio)
   return `${dimensions.width}x${dimensions.height}`
 }
 
+function chatGPT2APIImageSize(aspectRatio: unknown, size?: unknown, resolution?: unknown) {
+  return imageSizeForSettings(aspectRatio, size, resolution)
+}
+
 function configuredImageSize(config: Record<string, unknown>) {
-  const customSize = text(config.size).trim()
-  if (/^\d+x\d+$/i.test(customSize)) return customSize
-  const dimensions = imageSizeFromSettings(
-    text(config.resolution || '1k'),
-    text(config.aspectRatio || '1:1'),
-  )
-  return `${dimensions.width}x${dimensions.height}`
+  return imageSizeForSettings(config.aspectRatio, config.size, config.resolution)
 }
 
 function configuredImageCount(config: Record<string, unknown>) {
@@ -159,15 +170,18 @@ async function requestChatGPT2APIImage(input: {
     form.set('size', input.size)
     form.set('response_format', 'b64_json')
     for (const [index, reference] of references.entries()) {
-      const source = await fetch(absoluteMediaURL(reference.value))
-      if (!source.ok) throw new Error(`Could not download reference image ${index + 1}.`)
-      form.append(
-        references.length > 1 ? 'image[]' : 'image',
-        new Blob([await source.arrayBuffer()], {
+      const sourceURL = absoluteMediaURL(reference.value)
+      let blob: Blob
+      if (sourceURL.startsWith('data:')) {
+        blob = mediaBlobFromDataURL(sourceURL)
+      } else {
+        const source = await fetch(sourceURL)
+        if (!source.ok) throw new Error(`Could not download reference image ${index + 1}.`)
+        blob = new Blob([await source.arrayBuffer()], {
           type: source.headers.get('content-type') || 'image/png',
-        }),
-        `reference-${index + 1}.png`,
-      )
+        })
+      }
+      form.append(references.length > 1 ? 'image[]' : 'image', blob, `reference-${index + 1}.png`)
     }
     response = await fetch(chatGPT2APIEndpoint('images/edits'), {
       method: 'POST',
@@ -641,7 +655,10 @@ async function executeNodeOnce(
     case 'input.text':
       return { text: { type: 'text' as const, value: text(node.config.value) } }
     case 'input.prompt':
+    case 'input.user-prompt':
       return { prompt: { type: 'text' as const, value: text(node.config.value) } }
+    case 'input.system-prompt':
+      return { systemPrompt: { type: 'text' as const, value: text(node.config.value) } }
     case 'input.json': {
       const value = JSON.parse(text(node.config.value))
       return { json: { type: 'json' as const, value } }
@@ -916,11 +933,11 @@ async function executeNodeOnce(
     }
     case 'ai.generate-image': {
       const provider = text(node.config.provider || 'openai')
-      const prompt = text(inputs.prompt?.[0]?.value || node.config.prompt)
+      const systemPrompt = text(inputs.systemPrompt?.[0]?.value).trim()
+      const userPrompt = text(inputs.prompt?.[0]?.value || node.config.prompt).trim()
+      const prompt = [systemPrompt, userPrompt].filter(Boolean).join('\n\n')
       if (!prompt.trim())
-        throw new Error(
-          'Add a Prompt Input connection or enter a prompt in the node configuration.',
-        )
+        throw new Error('Connect a User Prompt or enter a prompt in the node configuration.')
       if (provider === 'replicate') {
         const generated = await runReplicate(text(node.config.model), {
           prompt,
@@ -1134,9 +1151,7 @@ async function executeNodeOnce(
       const provider = text(node.config.provider || 'replicate')
       const prompt = text(inputs.prompt?.[0]?.value || node.config.prompt)
       if (!prompt.trim())
-        throw new Error(
-          'Add a Prompt Input connection or enter a prompt in the node configuration.',
-        )
+        throw new Error('Connect a User Prompt or enter a prompt in the node configuration.')
       if (provider === 'comfyui') {
         const generated = await runComfyUI(node, prompt)
         return {
@@ -1308,7 +1323,7 @@ async function executeNodeOnce(
         throw new Error('Audio generation is currently available through OpenAI only.')
       }
       const prompt = text(inputs.prompt?.[0]?.value || node.config.prompt).trim()
-      if (!prompt) throw new Error('Enter text or connect a Prompt node before generating audio.')
+      if (!prompt) throw new Error('Enter text or connect a User Prompt before generating audio.')
       const apiKey = requireSecret('APP_OPENAI_API_KEY')
       const format = text(node.config.format || 'mp3')
       const response = await fetch(

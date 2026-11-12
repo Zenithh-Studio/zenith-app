@@ -117,7 +117,7 @@ const nodeActionRegistry: ActionRule[] = [
     id: 'generate-image-from-text',
     label: 'Generate image from text',
     icon: 'sparkles',
-    nodes: ['input.text', 'input.prompt'],
+    nodes: ['input.text', 'input.prompt', 'input.system-prompt', 'input.user-prompt'],
     visible: () => true,
     disabledReason: (context) =>
       context.hasText ? undefined : 'Add text before generating an image.',
@@ -142,14 +142,25 @@ const nodeActionRegistry: ActionRule[] = [
     id: 'copy-prompt',
     label: 'Copy prompt',
     icon: 'copy',
-    nodes: ['input.text', 'input.prompt', ...imageGeneratorNodeTypes],
+    nodes: [
+      'input.text',
+      'input.prompt',
+      'input.system-prompt',
+      'input.user-prompt',
+      ...imageGeneratorNodeTypes,
+    ],
     visible: (context) =>
       Boolean(
         context.hasImageOutput ||
-        (['input.text', 'input.prompt'].includes(context.nodeType) && context.hasText),
+        (['input.text', 'input.prompt', 'input.system-prompt', 'input.user-prompt'].includes(
+          context.nodeType,
+        ) &&
+          context.hasText),
       ),
     disabledReason: (context) =>
-      ['input.text', 'input.prompt'].includes(context.nodeType)
+      ['input.text', 'input.prompt', 'input.system-prompt', 'input.user-prompt'].includes(
+        context.nodeType,
+      )
         ? context.hasText
           ? undefined
           : 'Add text before copying the prompt.'
@@ -217,6 +228,8 @@ const nodeCapabilities: Record<
 > = {
   'input.text': { modality: 'text' },
   'input.prompt': { modality: 'text' },
+  'input.system-prompt': { modality: 'text' },
+  'input.user-prompt': { modality: 'text' },
   'input.json': { modality: 'text' },
   'input.image': { modality: 'image', inputMedia: true },
   'input.video': { modality: 'video', inputMedia: true },

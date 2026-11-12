@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('server-only', () => ({}))
 
 import { runWorkflow } from './engine'
+import { withProviderCredentials } from '../../providers/credential-context'
 import { canConnect, providersFor, registryByType } from '@znith/contracts'
 import type { ExecutionLog, NodeExecutionRecord, WorkflowDefinition } from '@znith/contracts'
 
@@ -282,7 +283,7 @@ describe('workflow engine', () => {
     )
   })
 
-  it('passes the selected image aspect ratio to ChatGPT2API', async () => {
+  it('uses the selected aspect ratio when a saved image size still has the square default', async () => {
     vi.stubEnv('APP_CHATGPT2API_BASE_URL', 'http://chatgpt2api:3000/v1')
     vi.stubEnv('APP_CHATGPT2API_API_KEY', 'test-api-key')
     const fetchMock = vi
@@ -302,7 +303,8 @@ describe('workflow engine', () => {
             provider: 'chatgpt2api',
             model: 'gpt-image-2',
             prompt: 'A product photo',
-            aspectRatio: '3:2',
+            aspectRatio: '16:9',
+            size: '1024x1024',
             retryCount: 0,
           },
         },
@@ -310,12 +312,74 @@ describe('workflow engine', () => {
       edges: [],
     }
 
-    const result = await runWorkflow(definition)
+    const result = await withProviderCredentials({ keys: { chatgpt2api: 'test-api-key' } }, () =>
+      runWorkflow(definition),
+    )
 
     expect(result.status).toBe('succeeded')
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      size: '1536x1024',
+      size: '1536x864',
     })
+  })
+
+  it('sends inline browser reference images to ChatGPT2API as multipart files', async () => {
+    vi.stubEnv('APP_CHATGPT2API_BASE_URL', 'http://chatgpt2api:3000/v1')
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ url: 'http://media.test/generated.png' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: 'reference',
+          type: 'input.image',
+          name: 'Reference image',
+          position: { x: 0, y: 0 },
+          config: {
+            url: 'data:image/png;base64,aGVsbG8=',
+            assetId: 'reference-asset',
+            mimeType: 'image/png',
+          },
+        },
+        {
+          id: 'generate',
+          type: 'ai.generate-image',
+          name: 'Generate image',
+          position: { x: 300, y: 0 },
+          config: {
+            provider: 'chatgpt2api',
+            model: 'gpt-image-2',
+            prompt: 'Keep the reference style',
+            retryCount: 0,
+          },
+        },
+      ],
+      edges: [
+        {
+          id: 'reference-generate',
+          source: 'reference',
+          sourceHandle: 'image',
+          target: 'generate',
+          targetHandle: 'image',
+        },
+      ],
+    }
+
+    const result = await withProviderCredentials({ keys: { chatgpt2api: 'test-api-key' } }, () =>
+      runWorkflow(definition),
+    )
+
+    expect(result.status).toBe('succeeded')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://chatgpt2api:3000/v1/images/edits')
+    const body = fetchMock.mock.calls[0]?.[1]?.body
+    expect(body).toBeInstanceOf(FormData)
+    const uploadedImage = (body as FormData).get('image')
+    expect(uploadedImage).toBeInstanceOf(Blob)
+    expect((uploadedImage as Blob).type).toBe('image/png')
+    expect(await (uploadedImage as Blob).text()).toBe('hello')
   })
 
   it('persists queued and running node records before execution finishes', async () => {
@@ -888,7 +952,7 @@ describe('workflow engine', () => {
       edges: [],
     }
     const result = await runWorkflow(definition)
-    expect(result.error).toContain('Add a Prompt Input connection')
+    expect(result.error).toContain('Connect a User Prompt')
   })
 
   it('supports one text output fan-out to multiple downstream nodes', async () => {

@@ -34,7 +34,7 @@ export const workflowTemplates: Record<
     definition: {
       version: 1,
       nodes: [
-        node('idea', 'input.prompt', 'Story idea', 80, 180, {
+        node('idea', 'input.user-prompt', 'Story idea', 80, 180, {
           value: 'A botanist discovers a city growing beneath the desert.',
         }),
         node('story', 'ai.generate-text', 'Generate story', 430, 120, {
@@ -67,7 +67,7 @@ export const workflowTemplates: Record<
     definition: {
       version: 1,
       nodes: [
-        node('brief', 'input.prompt', 'Creative brief', 80, 160, {
+        node('brief', 'input.user-prompt', 'Creative brief', 80, 160, {
           value: 'Premium studio photograph of a ceramic speaker.',
         }),
         node('prompt', 'ai.generate-text', 'Refine prompt', 430, 160, {
@@ -89,7 +89,7 @@ export const workflowTemplates: Record<
     definition: {
       version: 1,
       nodes: [
-        node('brief', 'input.prompt', 'Video prompt', 80, 160, {
+        node('brief', 'input.user-prompt', 'Video prompt', 80, 160, {
           value: 'A glass perfume bottle floating through a cloud chamber.',
         }),
         node('video', 'ai.generate-video', 'Generate video', 500, 160, {
