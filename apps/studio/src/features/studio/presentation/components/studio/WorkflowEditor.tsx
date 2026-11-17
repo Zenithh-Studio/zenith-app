@@ -2,7 +2,7 @@
 
 import { DropdownSelect } from './DropdownSelect'
 import { resolveLocalMediaUrl, studioFetch } from '@/lib/studio-local-api'
-import { getRecord, updateRecord } from '@/lib/studio-indexed-db'
+import { getAssetFile, getRecord, putRecord, updateRecord } from '@/lib/studio-indexed-db'
 import type { StudioRecord } from '@/lib/studio-indexed-db'
 
 import {
@@ -304,6 +304,7 @@ type NodeActionContextValue = {
   runNode: (nodeId: string, retry?: boolean) => void
   saveOutputToAssets: (nodeId: string, executionId?: string) => Promise<void>
   saveWorkflowUpload: (nodeId: string, assetId: string) => Promise<void>
+  saveLocalFrameToAssets: (nodeId: string, storageKey: string) => Promise<void>
   generateImageFromText: (nodeId: string) => void
   deleteNode: (nodeId: string) => void
   duplicateNode: (nodeId: string) => void
@@ -842,10 +843,15 @@ function NodeActionToolbar({
   const selectedOutput = mediaNodeValue(config.selectedOutput)
   const isInputMedia = type === 'input.image' || type === 'input.video' || type === 'input.audio'
   const inputOutput =
-    isInputMedia && config.url
+    isInputMedia && (config.url || config.storageKey)
       ? ({
           type: type === 'input.image' ? 'image' : type === 'input.audio' ? 'audio' : 'video',
-          value: { url: config.url },
+          value: {
+            url: config.url,
+            storageKey: config.storageKey,
+            fileName: config.fileName,
+            mimeType: config.mimeType,
+          },
           assetId: config.assetId,
         } as import('@znith/contracts').NodeValue)
       : undefined
@@ -908,6 +914,7 @@ function NodeActionToolbar({
     hasText: Boolean(isTextInputNodeType(type) && String(config.value || '').trim()),
     hasPrompt: Boolean(currentMediaVersion?.prompt),
     hasImageOutput: output?.type === 'image',
+    hasVideoOutput: output?.type === 'video',
     hasSavedImage: Boolean(imageAssetId),
     hasMediaOutput: Boolean(output && ['image', 'video', 'audio'].includes(output.type)),
     hasSavedOutput: Boolean(
@@ -924,6 +931,9 @@ function NodeActionToolbar({
   const copyPromptAction = registeredActions.find((item) => item.id === 'copy-prompt')
   const generateImageFromTextAction = registeredActions.find(
     (item) => item.id === 'generate-image-from-text',
+  )
+  const createImageFromLastFrameAction = registeredActions.find(
+    (item) => item.id === 'create-image-from-last-frame',
   )
   const copyOutputPrompt = async () => {
     const prompt = currentMediaVersion?.prompt
@@ -965,14 +975,21 @@ function NodeActionToolbar({
       setCopyPromptMessage('Clipboard access is unavailable.')
     }
   }
-  const captureVideoFrame = async () => {
+  const captureVideoFrame = async (
+    mode: 'first' | 'current' | 'last' = frameMode,
+    destination: 'assets' | 'workflow' = 'assets',
+  ) => {
     const video = videoRef?.current
-    if (!video || !imageAssetId || !video.videoWidth || !video.videoHeight) {
-      setFrameMessage('Load a saved video before capturing a frame.')
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setFrameMessage(t('The video preview is not ready.'))
       return
     }
-    if (frameMode === 'last' && !Number.isFinite(video.duration)) {
-      setFrameMessage('The video duration is unavailable.')
+    if (destination === 'assets' && !imageAssetId) {
+      setFrameMessage(t('Save the video to Assets before capturing a frame.'))
+      return
+    }
+    if (mode === 'last' && !Number.isFinite(video.duration)) {
+      setFrameMessage(t('The video duration is unavailable.'))
       return
     }
     setCapturingFrame(true)
@@ -982,11 +999,7 @@ function NodeActionToolbar({
     try {
       video.pause()
       const timestampSeconds =
-        frameMode === 'first'
-          ? 0
-          : frameMode === 'last'
-            ? Math.max(0, video.duration - 0.05)
-            : originalTime
+        mode === 'first' ? 0 : mode === 'last' ? Math.max(0, video.duration - 0.05) : originalTime
       if (Math.abs(timestampSeconds - originalTime) > 0.01) {
         await new Promise<void>((resolve, reject) => {
           const onSeeked = () => {
@@ -1012,36 +1025,63 @@ function NodeActionToolbar({
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
       if (!blob) throw new Error('The browser could not encode the captured frame.')
-      const filename = `${workflowNode.slug}-${frameMode}-frame.png`
-      const form = new FormData()
-      form.set('sourceVideoAssetId', imageAssetId)
-      form.set('captureMode', frameMode)
-      form.set('timestampSeconds', String(timestampSeconds))
-      form.set('file', new File([blob], filename, { type: 'image/png' }))
-      const response = await studioFetch('/api/studio/video-frames', { method: 'POST', body: form })
-      const body = (await response.json()) as {
-        media?: {
-          id: string
-          url?: string | null
-          filename?: string | null
-          mimeType?: string | null
-          derivedMetadata?: Record<string, unknown>
+      const filename = `${workflowNode.slug}-${mode}-frame.png`
+      if (destination === 'assets') {
+        const form = new FormData()
+        form.set('sourceVideoAssetId', imageAssetId)
+        form.set('captureMode', mode)
+        form.set('timestampSeconds', String(timestampSeconds))
+        form.set('file', new File([blob], filename, { type: 'image/png' }))
+        const response = await studioFetch('/api/studio/video-frames', {
+          method: 'POST',
+          body: form,
+        })
+        const body = (await response.json()) as {
+          media?: {
+            id: string
+            url?: string | null
+            filename?: string | null
+            mimeType?: string | null
+            derivedMetadata?: Record<string, unknown>
+          }
+          error?: string
         }
-        error?: string
+        if (!response.ok || !body.media)
+          throw new Error(body.error || 'The frame could not be saved.')
+        actions.addDerivedImages(workflowNode.id, 'capture-frame', [
+          {
+            id: body.media.id,
+            url: body.media.url,
+            filename: body.media.filename || filename,
+            mimeType: body.media.mimeType || 'image/png',
+            alt: `${workflowNode.name} · ${mode} frame`,
+            derivedMetadata: body.media.derivedMetadata,
+          },
+        ])
+        setFrameMessage(t('Frame saved to Assets and added as an image node.'))
+      } else {
+        const storageKey = crypto.randomUUID()
+        await putRecord('assetFiles', {
+          id: storageKey,
+          blob,
+          name: filename,
+          type: 'image/png',
+          size: blob.size,
+          createdAt: new Date().toISOString(),
+        })
+        actions.addDerivedImages(workflowNode.id, 'capture-frame', [
+          {
+            id: '',
+            storageKey,
+            filename,
+            mimeType: 'image/png',
+            alt: `${workflowNode.name} · ${mode} frame`,
+          },
+        ])
+        setFrameMessage(
+          t('Image node created. The frame is stored with this workflow, not in Assets.'),
+        )
       }
-      if (!response.ok || !body.media)
-        throw new Error(body.error || 'The frame could not be saved.')
-      actions.addDerivedImages(workflowNode.id, 'capture-frame', [
-        {
-          id: body.media.id,
-          url: body.media.url,
-          filename: body.media.filename || filename,
-          mimeType: body.media.mimeType || 'image/png',
-          alt: `${workflowNode.name} · ${frameMode} frame`,
-          derivedMetadata: body.media.derivedMetadata,
-        },
-      ])
-      setFrameMessage('Frame saved to Assets and added to the canvas.')
     } catch (failure) {
       setFrameMessage(
         failure instanceof Error ? failure.message : 'The video frame could not be captured.',
@@ -1415,7 +1455,15 @@ function NodeActionToolbar({
                 setSavingOutput(true)
                 try {
                   const uploadedAssetId = String(output?.assetId || output?.metadata?.assetId || '')
-                  if (workflowNode.config.workflowUpload && uploadedAssetId) {
+                  if (
+                    workflowNode.config.workflowLocalMedia === true &&
+                    typeof workflowNode.config.storageKey === 'string'
+                  ) {
+                    await actions.saveLocalFrameToAssets(
+                      workflowNode.id,
+                      workflowNode.config.storageKey,
+                    )
+                  } else if (workflowNode.config.workflowUpload && uploadedAssetId) {
                     await actions.saveWorkflowUpload(workflowNode.id, uploadedAssetId)
                   } else {
                     await actions.saveOutputToAssets(
@@ -1438,6 +1486,30 @@ function NodeActionToolbar({
                 <span className="text-[9px]">{savingOutput ? t('Saving') : t('Save')}</span>
               )}
             </button>
+          ) : null}
+          {createImageFromLastFrameAction ? (
+            <button
+              type="button"
+              title={t(
+                createImageFromLastFrameAction.disabledReason ||
+                  'Extract the final frame and create an image node.',
+              )}
+              aria-label={t(createImageFromLastFrameAction.label)}
+              disabled={createImageFromLastFrameAction.disabled || capturingFrame}
+              onClick={() => void captureVideoFrame('last', 'workflow')}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {capturingFrame ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <ImagePlus size={14} />
+              )}
+            </button>
+          ) : null}
+          {frameMessage ? (
+            <span role="status" title={frameMessage} className="sr-only">
+              {frameMessage}
+            </span>
           ) : null}
           {(type === 'ai.generate-image' || type === 'ai.edit-image') &&
           !hiddenQuickActions.includes('prompt') ? (
@@ -1713,6 +1785,21 @@ function NodeActionToolbar({
                 ) : null}
                 {type === 'input.video' || output?.type === 'video' ? (
                   <>
+                    {createImageFromLastFrameAction ? (
+                      <MenuItem
+                        icon={ImagePlus}
+                        label={t(createImageFromLastFrameAction.label)}
+                        disabled={capturingFrame || createImageFromLastFrameAction.disabled}
+                        title={t(
+                          createImageFromLastFrameAction.disabledReason ||
+                            'Extract the final frame and create an image node.',
+                        )}
+                        onClick={() => {
+                          setMoreOpen(false)
+                          void captureVideoFrame('last', 'workflow')
+                        }}
+                      />
+                    ) : null}
                     <label className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[10px] text-zinc-600">
                       <span>Frame source</span>
                       <DropdownSelect
@@ -2420,11 +2507,12 @@ function WorkflowNodeCard({ data, selected, width, height }: NodeProps<StudioNod
     data.workflowNode.type === 'input.audio'
   const selectedOutput = mediaNodeValue(data.workflowNode.config.selectedOutput, mediaType)
   const inputOutput =
-    isInputMedia && data.workflowNode.config.url
+    isInputMedia && (data.workflowNode.config.url || data.workflowNode.config.storageKey)
       ? ({
           type: mediaType,
           value: {
             url: data.workflowNode.config.url,
+            storageKey: data.workflowNode.config.storageKey,
             fileName: data.workflowNode.config.fileName,
             mimeType: data.workflowNode.config.mimeType,
           },
@@ -3279,8 +3367,26 @@ function portColor(dataType?: string) {
   return '#7c3aed'
 }
 
+function removeInvalidFrameEdges(definition: WorkflowDefinition): WorkflowDefinition {
+  const nodesById = new Map(definition.nodes.map((node) => [node.id, node]))
+  const edges = definition.edges.filter((edge) => {
+    const source = nodesById.get(edge.source)
+    const target = nodesById.get(edge.target)
+    const sourcePort = registryByType
+      .get(source?.type || '')
+      ?.outputs.find((port) => port.id === edge.sourceHandle)
+    return !(
+      sourcePort?.dataType === 'video' &&
+      target?.type === 'input.image' &&
+      edge.targetHandle === 'sourceVideo'
+    )
+  })
+  return edges.length === definition.edges.length ? definition : { ...definition, edges }
+}
+
 function toFlowEdges(definition: WorkflowDefinition): Edge[] {
-  return definition.edges.map((edge) => {
+  const normalizedDefinition = removeInvalidFrameEdges(definition)
+  return normalizedDefinition.edges.map((edge) => {
     const source = definition.nodes.find((node) => node.id === edge.source)
     const target = definition.nodes.find((node) => node.id === edge.target)
     const sourcePort = registryByType
@@ -3418,18 +3524,39 @@ function EditorInner({ workflowId }: { workflowId: string }) {
     const response = await studioFetch(`/api/studio/workflows/${workflowId}`, { cache: 'no-store' })
     const responseBody = await response.json()
     if (!response.ok) return setError(responseBody.error || 'Could not load workflow.')
+    let loadedWorkflow = responseBody.workflow as WorkflowDocument
+    const normalizedDefinition = removeInvalidFrameEdges(loadedWorkflow.definition)
+    let migrationSaved = true
+    if (normalizedDefinition !== loadedWorkflow.definition) {
+      const migrationResponse = await studioFetch(`/api/studio/workflows/${workflowId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: normalizedDefinition }),
+      })
+      if (migrationResponse.ok) {
+        const migrationBody = await migrationResponse.json()
+        loadedWorkflow = migrationBody.workflow || {
+          ...loadedWorkflow,
+          definition: normalizedDefinition,
+        }
+      } else {
+        loadedWorkflow = { ...loadedWorkflow, definition: normalizedDefinition }
+        migrationSaved = false
+      }
+    }
     const refreshedExecutions = responseBody.executions as ExecutionDocument[]
     const activeExecution = refreshedExecutions.find((execution) => execution.status === 'running')
     const latestExecution = activeExecution ?? refreshedExecutions[0]
     if (!hasLoadedWorkflowRef.current) {
       hasLoadedWorkflowRef.current = true
-      initialFitPendingRef.current = responseBody.workflow.definition.nodes.length > 0
+      initialFitPendingRef.current = loadedWorkflow.definition.nodes.length > 0
     }
-    setWorkflow(responseBody.workflow)
+    setWorkflow(loadedWorkflow)
+    setDirty(!migrationSaved)
     setExecutions(refreshedExecutions)
     setNodes(
       toFlowNodes(
-        responseBody.workflow.definition,
+        loadedWorkflow.definition,
         mergeExecutionNodeRecords(refreshedExecutions),
         latestExecution?.logs,
         refreshedExecutions,
@@ -3450,10 +3577,10 @@ function EditorInner({ workflowId }: { workflowId: string }) {
       setRunScopeIds([])
       setRunning(false)
     }
-    setEdges(toFlowEdges(responseBody.workflow.definition))
+    setEdges(toFlowEdges(loadedWorkflow.definition))
     setUndoStack([])
     setRedoStack([])
-  }, [setEdges, setNodes, workflowId])
+  }, [setDirty, setEdges, setNodes, workflowId])
 
   const checkVideoTask = useCallback(
     async (nodeId: string) => {
@@ -4429,8 +4556,9 @@ function EditorInner({ workflowId }: { workflowId: string }) {
         position: { x: baseX, y: baseY + index * 230 },
         config: {
           ...cloneValue(imageDefinition.defaultConfig),
-          assetId: asset.id,
+          ...(asset.id ? { assetId: asset.id } : {}),
           ...(asset.storageKey ? { storageKey: asset.storageKey } : {}),
+          ...(asset.storageKey && !asset.id ? { workflowLocalMedia: true } : {}),
           url: mediaSource(asset.url || '', asset.id, filename),
           fileName: filename,
           mimeType: asset.mimeType || 'image/png',
@@ -5727,6 +5855,55 @@ function EditorInner({ workflowId }: { workflowId: string }) {
                     failure instanceof Error
                       ? failure.message
                       : 'Upload could not be saved to Assets.',
+                  )
+                }
+              },
+              saveLocalFrameToAssets: async (nodeId, storageKey) => {
+                setError('')
+                try {
+                  const storedFile = await getAssetFile(storageKey)
+                  if (!storedFile?.blob) throw new Error(t('Frame image file is unavailable.'))
+                  const filename = storedFile.name || 'video-frame.png'
+                  const file = new File([storedFile.blob], filename, {
+                    type: storedFile.type || storedFile.blob.type || 'image/png',
+                  })
+                  const form = new FormData()
+                  form.set('file', file)
+                  form.set('alt', filename)
+                  const response = await studioFetch('/api/studio/assets', {
+                    method: 'POST',
+                    body: form,
+                  })
+                  const body = (await response.json()) as {
+                    media?: {
+                      id: string
+                      fileId?: string
+                      storageKey?: string
+                      url?: string | null
+                      filename?: string | null
+                      mimeType?: string | null
+                    }
+                    error?: string
+                  }
+                  if (!response.ok || !body.media) {
+                    throw new Error(body.error || t('Frame could not be saved to Assets.'))
+                  }
+                  const asset = body.media
+                  updateNodeConfig(nodeId, {
+                    assetId: asset.id,
+                    storageKey: asset.storageKey || asset.fileId || storageKey,
+                    url: mediaSource(asset.url || '', asset.id, asset.filename || filename),
+                    fileName: asset.filename || filename,
+                    mimeType: asset.mimeType || file.type,
+                    workflowLocalMedia: false,
+                  })
+                  window.dispatchEvent(new Event('zenith:assets-changed'))
+                  setNotice(t('Frame saved to Assets.'))
+                } catch (failure) {
+                  setError(
+                    failure instanceof Error
+                      ? failure.message
+                      : t('Frame could not be saved to Assets.'),
                   )
                 }
               },

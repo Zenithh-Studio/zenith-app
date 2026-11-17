@@ -479,6 +479,19 @@ const additionalVietnamese: Record<string, string> = {
   'Current frame': 'Khung hình hiện tại',
   'Last frame': 'Khung hình cuối',
   'Capture frame to Assets': 'Lưu khung hình vào Tài sản',
+  'Create image node from last frame': 'Tạo node ảnh từ khung hình cuối',
+  'Extract the final frame and create an image node.':
+    'Trích xuất khung hình cuối và tạo node ảnh.',
+  'Save the video to Assets before extracting a frame.':
+    'Lưu video vào Tài sản trước khi trích xuất khung hình.',
+  'Frame saved to Assets and added as an image node.':
+    'Đã lưu khung hình vào Tài sản và thêm node ảnh.',
+  'Image node created. The frame is stored with this workflow, not in Assets.':
+    'Đã tạo node ảnh. Khung hình được lưu cùng workflow, không nằm trong Tài sản.',
+  'The video preview is not ready.': 'Video xem trước chưa sẵn sàng.',
+  'Frame image file is unavailable.': 'Không tìm thấy tệp ảnh khung hình.',
+  'Frame saved to Assets.': 'Đã lưu khung hình vào Tài sản.',
+  'Frame could not be saved to Assets.': 'Không thể lưu khung hình vào Tài sản.',
   Uploading: 'Đang tải lên',
   'Run this group and its upstream dependencies': 'Chạy nhóm này cùng các phụ thuộc đầu vào',
   'Add members': 'Thêm thành viên',

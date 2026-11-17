@@ -20,6 +20,7 @@ export type NodeToolbarActionId =
   | 'cancel'
   | 'download'
   | 'save-to-assets'
+  | 'create-image-from-last-frame'
   | 'copy-prompt'
   | 'image-tools'
   | 'generate-image-from-text'
@@ -40,6 +41,7 @@ export type NodeActionContext = {
   hasImageOutput?: boolean
   hasSavedImage?: boolean
   hasMediaOutput?: boolean
+  hasVideoOutput?: boolean
   hasSavedOutput?: boolean
   hasText?: boolean
 }
@@ -135,6 +137,15 @@ const nodeActionRegistry: ActionRule[] = [
     icon: 'save',
     nodes: '*',
     visible: (context) => Boolean(context.hasMediaOutput && !context.hasSavedOutput),
+    disabledReason: (context) =>
+      context.isWorkflowRunning ? 'Wait until the active workflow run finishes.' : undefined,
+  },
+  {
+    id: 'create-image-from-last-frame',
+    label: 'Create image node from last frame',
+    icon: 'image-plus',
+    nodes: '*',
+    visible: (context) => Boolean(context.hasVideoOutput),
     disabledReason: (context) =>
       context.isWorkflowRunning ? 'Wait until the active workflow run finishes.' : undefined,
   },
