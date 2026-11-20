@@ -2,7 +2,7 @@
 
 import { DropdownSelect } from './DropdownSelect'
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, HardDrive, KeyRound, LoaderCircle, Sparkles } from 'lucide-react'
+import { Check, HardDrive, KeyRound, LoaderCircle, PlugZap, Sparkles } from 'lucide-react'
 import { studioFetch } from '@/lib/studio-local-api'
 import { getStorageEstimate } from '@/lib/studio-indexed-db'
 import { Sidebar } from './AppChrome'
@@ -173,6 +173,84 @@ function ProviderCard({
         )}
       </div>
     </form>
+  )
+}
+
+type MuseConnectionState =
+  'idle' | 'checking' | 'connected' | 'missing-key' | 'invalid-key' | 'gateway-unavailable'
+
+function Muse2APIProviderCard() {
+  const { t } = useLocale()
+  const [connection, setConnection] = useState<MuseConnectionState>('idle')
+
+  const connect = async () => {
+    setConnection('checking')
+    try {
+      const response = await studioFetch('/api/studio/providers/muse2api/connect', {
+        method: 'POST',
+      })
+      const result = (await response.json().catch(() => ({}))) as {
+        connected?: boolean
+        errorCode?: MuseConnectionState
+      }
+      setConnection(
+        response.ok && result.connected
+          ? 'connected'
+          : result.errorCode === 'missing-key' || result.errorCode === 'invalid-key'
+            ? result.errorCode
+            : 'gateway-unavailable',
+      )
+    } catch {
+      setConnection('gateway-unavailable')
+    }
+  }
+
+  const statusKey: Record<Exclude<MuseConnectionState, 'checking'>, string> = {
+    idle: 'settings.museNotChecked',
+    connected: 'settings.museConnected',
+    'missing-key': 'settings.museMissingKey',
+    'invalid-key': 'settings.museInvalidKey',
+    'gateway-unavailable': 'settings.museUnavailable',
+  }
+  const connected = connection === 'connected'
+
+  return (
+    <section className="rounded-xl border border-zinc-200 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-900">Muse2API</h3>
+          <p className="mt-1 text-xs text-zinc-500">{t('settings.providerHint.muse2api')}</p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${connected ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-600'}`}
+        >
+          {connected && <Check size={12} aria-hidden="true" />}
+          {connected
+            ? t('settings.museConnectedStatus')
+            : connection === 'checking'
+              ? t('settings.museChecking')
+              : t('settings.museDisconnected')}
+        </span>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void connect()}
+          disabled={connection === 'checking'}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#272441] px-3 text-xs font-semibold text-white transition hover:bg-[#403a6d] disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          {connection === 'checking' ? (
+            <LoaderCircle size={14} className="animate-spin" />
+          ) : (
+            <PlugZap size={14} />
+          )}
+          {t('settings.museConnect')}
+        </button>
+        <p role="status" aria-live="polite" className="text-xs text-zinc-500">
+          {connection === 'checking' ? t('settings.museChecking') : t(statusKey[connection])}
+        </p>
+      </div>
+    </section>
   )
 }
 
@@ -455,21 +533,23 @@ export function SettingsPage() {
             <Card>
               <div className="mb-5">
                 <h2 className="text-base font-semibold text-zinc-900">{t('settings.providers')}</h2>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Provider keys remain in this browser and are sent only when you run a generation.
-                </p>
+                <p className="mt-1 text-xs text-zinc-500">{t('settings.providerHelp')}</p>
               </div>
               <div className="grid gap-3 xl:grid-cols-2">
-                {providerOptions.map((provider) => (
-                  <ProviderCard
-                    key={provider.id}
-                    provider={provider}
-                    status={providers[provider.id]}
-                    onSaved={(id, status) =>
-                      setProviders((current) => ({ ...current, [id]: status }))
-                    }
-                  />
-                ))}
+                {providerOptions.map((provider) =>
+                  provider.id === 'muse2api' ? (
+                    <Muse2APIProviderCard key={provider.id} />
+                  ) : (
+                    <ProviderCard
+                      key={provider.id}
+                      provider={provider}
+                      status={providers[provider.id]}
+                      onSaved={(id, status) =>
+                        setProviders((current) => ({ ...current, [id]: status }))
+                      }
+                    />
+                  ),
+                )}
               </div>
             </Card>
             <Card>

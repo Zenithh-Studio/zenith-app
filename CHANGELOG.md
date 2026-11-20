@@ -15,6 +15,7 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 ### [Improved]
 
 - Add targeted indexes for owner-scoped Studio lists and background generation polling.
+- Muse2API settings now check the server-managed gateway connection instead of asking for a browser API key.
 
 ## v0.3.1 - 2026-11-08
 

@@ -1,8 +1,4 @@
 import { withContextApiLogging } from '@/lib/server-logger'
-import {
-  withProviderCredentials,
-  type ProviderCredentials,
-} from '@/server/modules/providers/credential-context'
 import { inlineMuse2APIMedia } from '@/server/modules/workflows/infrastructure/muse2api-media'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -15,18 +11,9 @@ async function recoverMuse2APIMedia(request: Request) {
     return Response.json({ error: 'A valid Muse2API media URL is required.' }, { status: 400 })
   }
 
-  const credentialInput = isRecord(body.credentials) ? body.credentials : {}
-  const keys = isRecord(credentialInput.keys) ? credentialInput.keys : {}
-  const baseUrls = isRecord(credentialInput.baseUrls) ? credentialInput.baseUrls : {}
-  const apiKey = typeof keys.muse2api === 'string' ? keys.muse2api : ''
-  const baseUrl = typeof baseUrls.muse2api === 'string' ? baseUrls.muse2api : ''
-  const credentials: ProviderCredentials = {
-    ...(apiKey ? { keys: { muse2api: apiKey } } : {}),
-    ...(baseUrl ? { baseUrls: { muse2api: baseUrl } } : {}),
-  }
-
-  const media = await withProviderCredentials(credentials, () =>
-    inlineMuse2APIMedia(body.url as string, typeof body.mimeType === 'string' ? body.mimeType : ''),
+  const media = await inlineMuse2APIMedia(
+    body.url as string,
+    typeof body.mimeType === 'string' ? body.mimeType : '',
   )
   if (!media) {
     return Response.json(

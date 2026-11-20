@@ -361,8 +361,6 @@ async function recoverMuse2APIMediaValue(value: NodeValue): Promise<NodeValue> {
   let recovery = muse2APIMediaRecoveryCache.get(sourceUrl)
   if (!recovery) {
     recovery = (async () => {
-      const providerCredential = (await readLocalProviderCredentials()).muse2api
-      if (!providerCredential?.apiKey) return null
       const response = await networkFetch(
         new URL('/api/studio/media/muse2api', window.location.origin),
         {
@@ -371,12 +369,6 @@ async function recoverMuse2APIMediaValue(value: NodeValue): Promise<NodeValue> {
           body: JSON.stringify({
             url: sourceUrl,
             mimeType: data.mimeType,
-            credentials: {
-              keys: { muse2api: providerCredential.apiKey },
-              ...(providerCredential.baseUrl
-                ? { baseUrls: { muse2api: providerCredential.baseUrl } }
-                : {}),
-            },
           }),
         },
       ).catch(() => null)
@@ -633,12 +625,12 @@ async function generationsApi(url: URL, method: string, init?: RequestInit) {
     keys: Object.fromEntries(
       Object.entries(credentials)
         .map(([key, value]) => [key, value?.apiKey])
-        .filter(([, value]) => Boolean(value)),
+        .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
     ),
     baseUrls: Object.fromEntries(
       Object.entries(credentials)
         .map(([key, value]) => [key, value?.baseUrl])
-        .filter(([, value]) => Boolean(value)),
+        .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
     ),
   }
   const response = await networkFetch(new URL('/api/studio/run/generations', url.origin), {
@@ -960,12 +952,12 @@ async function workflowSubrouteApi(url: URL, method: string, init?: RequestInit)
       keys: Object.fromEntries(
         Object.entries(credentials)
           .map(([key, value]) => [key, value?.apiKey])
-          .filter(([, value]) => Boolean(value)),
+          .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
       ),
       baseUrls: Object.fromEntries(
         Object.entries(credentials)
           .map(([key, value]) => [key, value?.baseUrl])
-          .filter(([, value]) => Boolean(value)),
+          .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
       ),
     }
     const response = await networkFetch(url, {
@@ -1290,12 +1282,12 @@ async function imageToolsApi(url: URL, method: string, init?: RequestInit) {
         keys: Object.fromEntries(
           Object.entries(credentials)
             .map(([key, value]) => [key, value?.apiKey])
-            .filter(([, value]) => Boolean(value)),
+            .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
         ),
         baseUrls: Object.fromEntries(
           Object.entries(credentials)
             .map(([key, value]) => [key, value?.baseUrl])
-            .filter(([, value]) => Boolean(value)),
+            .filter(([key, value]) => key !== 'muse2api' && Boolean(value)),
         ),
       },
     }),

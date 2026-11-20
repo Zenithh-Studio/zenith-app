@@ -11,7 +11,7 @@ const providerEnvNames = {
   replicate: ['REPLICATE_API_TOKEN'],
   runway: ['RUNWAYML_API_SECRET'],
   chatgpt2api: ['APP_CHATGPT2API_API_KEY'],
-  muse2api: ['APP_MUSE2API_API_KEY'],
+  muse2api: ['MUSE2API_API_KEY', 'APP_MUSE2API_API_KEY'],
 } as const
 
 export type ProviderId = keyof typeof providerEnvNames
@@ -36,6 +36,13 @@ function providerForEnvName(name: string): ProviderId | undefined {
 export function resolveProviderKey(name: string) {
   const context = credentialContext.getStore()
   const provider = providerForEnvName(name)
+  if (provider === 'muse2api') {
+    const serverKey = process.env.MUSE2API_API_KEY || process.env.APP_MUSE2API_API_KEY
+    if (serverKey) return serverKey
+    throw new Error(
+      'Muse2API is not configured. Set the MUSE2API_API_KEY server environment variable.',
+    )
+  }
   const key = provider ? context?.keys?.[provider] : undefined
   if (key) return key
   throw new Error(
@@ -44,6 +51,7 @@ export function resolveProviderKey(name: string) {
 }
 
 export function resolveProviderBaseUrl(provider: ProviderId, fallback: string) {
+  if (provider === 'muse2api') return fallback
   return credentialContext.getStore()?.baseUrls?.[provider] || fallback
 }
 
