@@ -38,6 +38,10 @@ type LocalSettings = StudioRecord & {
 }
 
 const mediaUrlCache = new Map<string, string>()
+const muse2APIMediaRecoveryCache = new Map<
+  string,
+  Promise<{ url: string; mimeType?: string } | null>
+>()
 
 const defaultSettings: LocalSettings = {
   id: 'current',
@@ -347,7 +351,60 @@ async function persistMediaValue(value: NodeValue): Promise<NodeValue> {
   }
 }
 
-async function hydrateNodeValue(value: NodeValue): Promise<NodeValue> {
+async function recoverMuse2APIMediaValue(value: NodeValue): Promise<NodeValue> {
+  if (value.type !== 'video' || value.metadata?.provider !== 'muse2api') return value
+  const data = mediaData(value)
+  const sourceUrl = typeof data.url === 'string' ? data.url : ''
+  if (!sourceUrl || sourceUrl.startsWith('data:') || sourceUrl.startsWith('blob:')) return value
+  if (typeof window === 'undefined') return value
+
+  let recovery = muse2APIMediaRecoveryCache.get(sourceUrl)
+  if (!recovery) {
+    recovery = (async () => {
+      const providerCredential = (await readLocalProviderCredentials()).muse2api
+      if (!providerCredential?.apiKey) return null
+      const response = await networkFetch(
+        new URL('/api/studio/media/muse2api', window.location.origin),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: sourceUrl,
+            mimeType: data.mimeType,
+            credentials: {
+              keys: { muse2api: providerCredential.apiKey },
+              ...(providerCredential.baseUrl
+                ? { baseUrls: { muse2api: providerCredential.baseUrl } }
+                : {}),
+            },
+          }),
+        },
+      ).catch(() => null)
+      if (!response?.ok) return null
+      const result = (await response.json().catch(() => null)) as Record<string, unknown> | null
+      if (!result || typeof result.url !== 'string' || !result.url.startsWith('data:')) return null
+      return {
+        url: result.url,
+        ...(typeof result.mimeType === 'string' ? { mimeType: result.mimeType } : {}),
+      }
+    })()
+    muse2APIMediaRecoveryCache.set(sourceUrl, recovery)
+    void recovery
+      .then((result) => {
+        if (!result) muse2APIMediaRecoveryCache.delete(sourceUrl)
+      })
+      .catch(() => muse2APIMediaRecoveryCache.delete(sourceUrl))
+  }
+
+  const recovered = await recovery.catch(() => null)
+  return recovered ? { ...value, value: { ...data, ...recovered } } : value
+}
+
+async function hydrateNodeValue(
+  value: NodeValue,
+  recoverLegacyMuse2APIMedia = false,
+): Promise<NodeValue> {
+  if (recoverLegacyMuse2APIMedia) value = await recoverMuse2APIMediaValue(value)
   const data = mediaData(value)
   const storageKey =
     (typeof data.storageKey === 'string' && data.storageKey) ||
@@ -375,7 +432,10 @@ async function hydrateNodeValue(value: NodeValue): Promise<NodeValue> {
   }
 }
 
-async function hydrateExecution<T extends StudioRecord>(execution: T) {
+async function hydrateExecution<T extends StudioRecord>(
+  execution: T,
+  recoverMuse2APINodeIds: ReadonlySet<string> = new Set(),
+) {
   const records = Array.isArray(execution.nodeRecords)
     ? (execution.nodeRecords as Array<Record<string, unknown>>)
     : []
@@ -386,7 +446,7 @@ async function hydrateExecution<T extends StudioRecord>(execution: T) {
         await Promise.all(
           Object.entries(record.outputs as Record<string, NodeValue>).map(async ([key, value]) => [
             key,
-            await hydrateNodeValue(value),
+            await hydrateNodeValue(value, recoverMuse2APINodeIds.has(String(record.nodeId || ''))),
           ]),
         ),
       )
@@ -394,6 +454,46 @@ async function hydrateExecution<T extends StudioRecord>(execution: T) {
     }),
   )
   return { ...execution, nodeRecords }
+}
+
+function latestMuse2APIRecoveryTargets(executions: StudioRecord[]) {
+  const targets = new Map<string, Set<string>>()
+  const seenVideoNodes = new Set<string>()
+
+  for (const execution of executions) {
+    const executionId = String(execution.id || '')
+    const records = Array.isArray(execution.nodeRecords)
+      ? (execution.nodeRecords as Array<Record<string, unknown>>)
+      : []
+    for (const record of records) {
+      const nodeId = typeof record.nodeId === 'string' ? record.nodeId : ''
+      if (!nodeId || seenVideoNodes.has(nodeId) || record.status !== 'succeeded') continue
+      const outputs =
+        record.outputs && typeof record.outputs === 'object'
+          ? (record.outputs as Record<string, NodeValue>)
+          : null
+      if (!outputs) continue
+      const video = Object.values(outputs).find((output) => output?.type === 'video')
+      if (!video) continue
+
+      seenVideoNodes.add(nodeId)
+      if (video.metadata?.provider !== 'muse2api') continue
+      const sourceUrl = mediaData(video).url
+      if (
+        typeof sourceUrl !== 'string' ||
+        !sourceUrl ||
+        sourceUrl.startsWith('data:') ||
+        sourceUrl.startsWith('blob:')
+      ) {
+        continue
+      }
+      const nodeIds = targets.get(executionId) || new Set<string>()
+      nodeIds.add(nodeId)
+      targets.set(executionId, nodeIds)
+    }
+  }
+
+  return targets
 }
 
 async function persistMediaDocument(asset: StudioRecord) {
@@ -718,9 +818,17 @@ async function workflowsApi(url: URL, method: string, init?: RequestInit) {
         .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))
         .slice(0, 20)
     }
+    const recoveryTargets = latestMuse2APIRecoveryTargets(history)
     return json({
       workflow: await hydrateWorkflow(workflow),
-      executions: await Promise.all(history.map(hydrateExecution)),
+      executions: await Promise.all(
+        history.map((execution) =>
+          hydrateExecution(
+            execution,
+            recoveryTargets.get(String(execution.id || '')) || new Set<string>(),
+          ),
+        ),
+      ),
     })
   }
   if (method === 'PATCH') {

@@ -9,6 +9,7 @@ import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
 import { withContextApiLogging } from '@/lib/server-logger'
 import { withProviderCredentials } from '@/server/modules/providers/credential-context'
+import { inlineMuse2APIMedia } from '@/server/modules/workflows/infrastructure/muse2api-media'
 import { runWorkflow } from '@/server/modules/workflows/infrastructure/engine'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -110,10 +111,19 @@ function isPrivateAddress(address: string) {
   )
 }
 
-async function inlineMediaURL(value: unknown) {
+async function inlineMediaURL(value: unknown, provider?: string) {
   if (!isRecord(value) || typeof value.url !== 'string') return value
   const source = value.url
   if (source.startsWith('data:')) return value
+
+  if (provider === 'muse2api') {
+    const inlined = await inlineMuse2APIMedia(
+      source,
+      typeof value.mimeType === 'string' ? value.mimeType : '',
+    )
+    if (inlined) return { ...value, ...inlined }
+  }
+
   let url: URL
   try {
     url = new URL(source)
@@ -151,7 +161,9 @@ async function inlineExecutionMedia(records: NodeExecutionRecord[]) {
         await Promise.all(
           Object.entries(record.outputs).map(async ([key, output]) => {
             if (!['image', 'video', 'audio'].includes(output.type)) return [key, output]
-            const value = await inlineMediaURL(output.value)
+            const provider =
+              typeof output.metadata?.provider === 'string' ? output.metadata.provider : undefined
+            const value = await inlineMediaURL(output.value, provider)
             return [key, { ...output, value }]
           }),
         ),
@@ -209,13 +221,13 @@ async function executeWorkflow(request: Request, context: RouteContext) {
       : 'workflow'
 
   try {
-    const result = await withProviderCredentials(
+    const { result, localRecords } = await withProviderCredentials(
       {
         keys: credentials.keys || {},
         baseUrls: credentials.baseUrls || {},
       },
-      () =>
-        runWorkflow(definition, input.data.targetNodeId, {
+      async () => {
+        const result = await runWorkflow(definition, input.data.targetNodeId, {
           signal: controller.signal,
           ...(group ? { targetNodeIds: group.nodeIds } : {}),
           onNodeRecord: async (record) => {
@@ -228,13 +240,17 @@ async function executeWorkflow(request: Request, context: RouteContext) {
             const record = recordsById.get(nodeId)
             if (record) recordsById.set(nodeId, { ...record, providerTask: { ...task } })
           },
-        }),
+        })
+        return {
+          result,
+          localRecords: stripInlineInputMedia(
+            await inlineExecutionMedia(result.records),
+            definition,
+          ),
+        }
+      },
     )
     const completedAt = new Date()
-    const localRecords = stripInlineInputMedia(
-      await inlineExecutionMedia(result.records),
-      definition,
-    )
     const execution: ExecutionDocument & { workflowId: string } = {
       id: executionId,
       workflow: id,
