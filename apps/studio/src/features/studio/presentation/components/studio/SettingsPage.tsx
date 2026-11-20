@@ -130,7 +130,9 @@ function ProviderCard({
           autoComplete="new-password"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder={configured ? t('settings.replaceKey') : t('settings.pasteProviderKey')}
+          placeholder={
+            configured ? t('settings.savedKeyPlaceholder') : t('settings.pasteProviderKey')
+          }
           className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-50"
         />
       </label>
@@ -146,7 +148,9 @@ function ProviderCard({
           className="mt-1.5 h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-50"
         />
       </label>
-      <p className="mt-1.5 text-[11px] text-zinc-400">Stored only in this browser's IndexedDB.</p>
+      <p className="mt-1.5 text-[11px] text-zinc-400">
+        {configured ? t('settings.savedKeyHelp') : t('settings.providerKeyStorageHelp')}
+      </p>
       {configured && (
         <label className="mt-3 flex w-fit items-center gap-2 text-xs text-zinc-600">
           <input
@@ -263,6 +267,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [formRevision, setFormRevision] = useState(0)
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null)
 
   useEffect(() => {
     let active = true
@@ -352,6 +357,7 @@ export function SettingsPage() {
   const imagePref = settings.imagePreferences
   const videoPref = settings.videoPreferences
   const audioPref = settings.audioPreferences
+  const selectedProviderOption = providerOptions.find(({ id }) => id === selectedProvider)
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f7f7f8] lg:flex-row">
@@ -535,22 +541,53 @@ export function SettingsPage() {
                 <h2 className="text-base font-semibold text-zinc-900">{t('settings.providers')}</h2>
                 <p className="mt-1 text-xs text-zinc-500">{t('settings.providerHelp')}</p>
               </div>
-              <div className="grid gap-3 xl:grid-cols-2">
-                {providerOptions.map((provider) =>
-                  provider.id === 'muse2api' ? (
-                    <Muse2APIProviderCard key={provider.id} />
-                  ) : (
-                    <ProviderCard
+              <div
+                className="mb-4 flex flex-nowrap gap-2 overflow-x-auto pb-2"
+                role="group"
+                aria-label={t('settings.providers')}
+              >
+                {providerOptions.map((provider) => {
+                  const selected = selectedProvider === provider.id
+                  const configured =
+                    provider.id !== 'muse2api' && providers[provider.id]?.configured
+                  return (
+                    <button
                       key={provider.id}
-                      provider={provider}
-                      status={providers[provider.id]}
-                      onSaved={(id, status) =>
-                        setProviders((current) => ({ ...current, [id]: status }))
-                      }
-                    />
-                  ),
-                )}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setSelectedProvider(provider.id)}
+                      className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition ${selected ? 'border-[#272441] bg-[#272441] text-white' : 'border-zinc-200 bg-white text-zinc-700 hover:border-violet-300 hover:bg-violet-50'}`}
+                    >
+                      {provider.name}
+                      {configured && (
+                        <Check
+                          size={13}
+                          aria-label={t('settings.configured')}
+                          className={selected ? 'text-emerald-300' : 'text-emerald-600'}
+                        />
+                      )}
+                    </button>
+                  )
+                })}
               </div>
+              {selectedProviderOption ? (
+                selectedProviderOption.id === 'muse2api' ? (
+                  <Muse2APIProviderCard key={selectedProviderOption.id} />
+                ) : (
+                  <ProviderCard
+                    key={selectedProviderOption.id}
+                    provider={selectedProviderOption}
+                    status={providers[selectedProviderOption.id]}
+                    onSaved={(id, status) =>
+                      setProviders((current) => ({ ...current, [id]: status }))
+                    }
+                  />
+                )
+              ) : (
+                <p className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-500">
+                  {t('settings.selectProvider')}
+                </p>
+              )}
             </Card>
             <Card>
               <div className="flex items-start gap-3">
