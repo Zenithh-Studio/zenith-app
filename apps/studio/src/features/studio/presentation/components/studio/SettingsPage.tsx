@@ -26,8 +26,8 @@ const providerOptions: Array<{ id: ProviderId; name: string }> = [
   { id: 'gemini', name: 'Google Gemini' },
   { id: 'replicate', name: 'Replicate' },
   { id: 'runway', name: 'Runway' },
-  { id: 'chatgpt2api', name: 'ChatGPT2API' },
-  { id: 'muse2api', name: 'Muse2API' },
+  { id: 'chatgpt2api', name: 'ChatGPT' },
+  { id: 'muse2api', name: 'Muse' },
 ]
 
 const emptySettings: StudioSettings = {
@@ -222,7 +222,7 @@ function Muse2APIProviderCard() {
     <section className="rounded-xl border border-zinc-200 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-900">Muse2API</h3>
+          <h3 className="text-sm font-semibold text-zinc-900">Muse</h3>
           <p className="mt-1 text-xs text-zinc-500">{t('settings.providerHint.muse2api')}</p>
         </div>
         <span

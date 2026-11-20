@@ -7804,8 +7804,7 @@ function MediaConfiguration({
       )}
       {config.provider === 'muse2api' && (
         <p className="text-[10px] leading-relaxed text-zinc-400">
-          Muse2API uses a server-configured gateway. It supports text-to-video or one first-frame
-          image.
+          Muse uses a server-configured gateway. It supports text-to-video or one first-frame image.
         </p>
       )}
       {(config.provider === 'custom-http' || config.provider === 'comfyui') && (

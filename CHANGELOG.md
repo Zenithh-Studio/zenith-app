@@ -17,6 +17,7 @@ Project releases and notable user-facing changes are recorded here. Release Plea
 - Add targeted indexes for owner-scoped Studio lists and background generation polling.
 - Muse2API settings now check the server-managed gateway connection instead of asking for a browser API key.
 - Provider settings now show one selected provider at a time and indicate when a key is saved.
+- Provider settings and workflow guidance use the shorter Muse and ChatGPT names.
 
 ## v0.3.1 - 2026-11-08
 
